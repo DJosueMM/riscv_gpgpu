@@ -21,6 +21,11 @@ ctest --test-dir build-all --output-on-failure
 
 ## Benchmark Reproduction
 
+> **Prerequisite:** clone the Rodinia dataset once before running benchmarks:
+> ```bash
+> git clone --depth 1 https://github.com/yuhc/gpu-rodinia.git external/rodinia
+> ```
+
 ```bash
 bash scripts/benchmark/run_rodinia_real_matrix.sh
 python3 scripts/benchmark/analyze_results.py --matrix-dir results/benchmarks/rodinia_real_matrix
