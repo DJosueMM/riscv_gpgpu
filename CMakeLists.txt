@@ -1,0 +1,91 @@
+cmake_minimum_required(VERSION 3.24)
+project(RISCV_GPGPU 
+    VERSION 0.1.0
+    DESCRIPTION "FPGA-Based Open RISC-V GPGPU Platform"
+    LANGUAGES CXX C
+)
+
+# Project-wide settings
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Option for build types
+set(CMAKE_CONFIGURATION_TYPES Debug Release RelWithDebInfo)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Include project CMake modules
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Set output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+
+# Shared path used by runtime/software/models for architecture defaults.
+set(RISCV_GPGPU_ARCH_CONFIG_PATH "${CMAKE_SOURCE_DIR}/config/arch_config.yaml"
+    CACHE FILEPATH "Default architecture configuration file")
+
+add_library(riscv_gpgpu_paths INTERFACE)
+target_compile_definitions(riscv_gpgpu_paths INTERFACE
+    RISCV_GPGPU_ARCH_CONFIG_PATH="${RISCV_GPGPU_ARCH_CONFIG_PATH}"
+)
+
+# Project features
+option(BUILD_SYSTEMC_MODELS "Build SystemC models" ON)
+option(BUILD_SYSTEMC_INTEGRATION "Build SystemC software integration layer" OFF)
+option(BUILD_TESTS "Build test suites" ON)
+option(BUILD_HLS "Build HLS implementation (requires Vitis HLS)" OFF)
+option(BUILD_BENCHMARKS "Build benchmark utilities" ON)
+option(BUILD_DOCUMENTATION "Build documentation" OFF)
+option(FPGA_TARGET "Target real FPGA hardware (Kria) instead of the host-memory simulation driver" OFF)
+
+# Find required packages
+if(BUILD_SYSTEMC_MODELS OR BUILD_SYSTEMC_INTEGRATION)
+    find_package(SystemC REQUIRED)
+else()
+    message(STATUS "SystemC models and integration are OFF; skipping SystemC detection")
+endif()
+
+# Optional packages
+if(BUILD_TESTS)
+    enable_testing()
+    find_package(GTest QUIET)
+endif()
+
+if(BUILD_HLS)
+    # HLS toolchain detection
+    # This is typically handled through environment or separate build system
+endif()
+
+# Add subdirectories
+# driver must come before software/runtime because host_api and runtime link against driver_lib.
+add_subdirectory(driver)
+add_subdirectory(software)
+add_subdirectory(runtime)
+
+if(SystemC_FOUND)
+    add_subdirectory(models)
+endif()
+
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
+if(BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
+# Print configuration summary
+message(STATUS "RISCV_GPGPU Build Configuration:")
+message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "  SystemC Models: ${BUILD_SYSTEMC_MODELS}")
+message(STATUS "  SystemC Integration: ${BUILD_SYSTEMC_INTEGRATION}")
+message(STATUS "  Tests: ${BUILD_TESTS}")
+message(STATUS "  HLS: ${BUILD_HLS}")
+message(STATUS "  Benchmarks: ${BUILD_BENCHMARKS}")
+message(STATUS "  Documentation: ${BUILD_DOCUMENTATION}")
+message(STATUS "  FPGA target: ${FPGA_TARGET}")
+message(STATUS "  Arch config path: ${RISCV_GPGPU_ARCH_CONFIG_PATH}")

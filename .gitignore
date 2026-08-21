@@ -1,0 +1,102 @@
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Speckit internal artifacts (managed by tooling)
+.specify/*
+.specify/scripts/bash/check-prerequisites.sh
+.github/*
+.opencode/*
+
+# External dependencies (cloned locally, not tracked)
+external/
+
+# C++ Build Artifacts
+build/
+build_*/
+build-*/
+build-all/
+debug/
+release/
+*.o
+*.a
+*.so
+*.exe
+*.dll
+*.dylib
+*.lib
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+# But DO track project CMake modules (cmake/ directory).
+!cmake/*.cmake
+
+# SystemC standalone test binaries (models/systemc/test/make)
+models/systemc/test/riscv_gpgpu_regression
+models/systemc/test/riscv_gpgpu_benchmark
+models/systemc/test/build/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+*.egg
+.venv/
+venv/
+env/
+ENV/
+
+# SystemC and ModelSim
+work/
+*.wdb
+*.vcd
+*.vvp
+*.vho
+systemc_objs/
+
+# HLS and Vivado
+*.hls/
+*.runs/
+*.srcs/
+*.ip_user_files/
+*.hw/
+*.jou
+*.log
+vivado_pid*.txt
+hls_prj/
+solution*/
+
+# CMake
+CMakeCache.txt
+cmake-build-debug/
+cmake-build-release/
+
+# Temporary and backup files
+*.tmp
+*.bak
+results.txt
+*.swp
+*.swo
+*~
+.#*
+core
+*.core
+
+# Generated documentation
+docs/html/
+docs/latex/
+docs/pdf/
+
+# Exclude generated results except cu_sweep reports/bitstreams
+results/*
+!results/cu_sweep

@@ -1,0 +1,28 @@
+# CMakeLists.txt - Top-level module
+
+add_library(gpgpu_top STATIC top.cpp)
+target_link_libraries(gpgpu_top
+    PUBLIC
+    systemc_common
+    compute_unit
+    warp_scheduler
+    simt_controller
+    memory_hierarchy
+    SystemC::SystemC
+)
+target_include_directories(gpgpu_top PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+add_executable(systemc_simulation simulation_main.cpp)
+target_link_libraries(systemc_simulation
+    PRIVATE
+    gpgpu_top
+    systemc_common
+    SystemC::SystemC
+)
+
+set_target_properties(systemc_simulation PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
