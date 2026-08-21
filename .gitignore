@@ -38,6 +38,8 @@ Makefile
 *.cmake
 # But DO track project CMake modules (cmake/ directory).
 !cmake/*.cmake
+# Hand-crafted Makefile for standalone SystemC test/benchmark builds
+!models/systemc/test/Makefile
 
 # SystemC standalone test binaries (models/systemc/test/make)
 models/systemc/test/riscv_gpgpu_regression
