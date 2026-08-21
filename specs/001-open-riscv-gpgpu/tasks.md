@@ -424,7 +424,7 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 
 **Checkpoint**: End-to-end CUDA → RISC-V ELF → ARM host → FPGA GPGPU → results verified on Kria hardware.
 
-> **Evidence correction (2026-08-21):** T050-T055 establish documentation and
+> **Evidence correction (2026-08-20):** T050-T055 establish documentation and
 > software paths, and T085/T086/T090/T091 establish HLS/Vivado implementation.
 > They do not prove physical kernel execution. The current Kria report skipped
 > DDR and kernel execution, so its PASS is invalid for T087-T089/T092 and those
@@ -448,6 +448,27 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 
 - [ ] T096 Rewrite the architecture around host/runtime, platform backend, platform shell, accelerator core, external memory, and observability boundaries
 	- Acceptance: reset, launch, completion, error ownership, and board-independent interfaces are explicit in `docs/architecture/interfaces.md` and ADRs.
+- [ ] T096a Define the workload and performance envelope before selecting interfaces or scaling the core
+	- Question: which workload classes optimize latency, throughput, launch rate, energy, or a balanced score?
+	- Acceptance: streaming, irregular, synchronization-heavy, compute-bound, and microkernel classes have fixed sizes, operational intensity, target metrics, and acceptable regressions.
+- [ ] T096b Decide whether direct AXI4-Lite launch is sufficient or a memory-resident command queue is required
+	- Question: at what kernel duration or launch rate does register-by-register submission become material?
+	- Acceptance: compare direct CSR and descriptor-queue/doorbell alternatives using launches/s, setup latency, CPU cost, polling/interrupt cost, and control overhead; AXI4-Lite is never used for bulk payloads or trace data.
+- [ ] T096c Select the external data-plane width, burst, alignment, outstanding depth, and port count from measurements
+	- Question: do wider AXI and deeper outstanding settings increase sustainable bandwidth with the actual request protocol?
+	- Acceptance: sweep read/write/mixed traffic and report GB/s, latency distribution, useful bytes per burst, AXI utilization/stalls, resources, and timing against the platform memory ceiling.
+- [ ] T096d Select the CU-to-memory concurrency and interconnect architecture
+	- Question: should the current one-outstanding-per-CU N:1 path become tagged multi-outstanding, coalesced, banked, or per-cluster?
+	- Acceptance: 1/2/4/8-CU sweeps report scaling efficiency, queue occupancy, arbitration fairness, coalescing ratio, latency hiding, and starvation; identify the first saturated stage.
+- [ ] T096e Select cache-line, L1/L2, write, allocation, and scratchpad policies by workload class
+	- Question: does each structure reduce external traffic or exposed latency enough to justify BRAM/URAM and timing cost?
+	- Acceptance: compare hit rates, traffic amplification, memory stalls, useful bytes per burst, resource use, and coherence/correctness for streaming, random, and write-heavy patterns.
+- [ ] T096f Select platform memory topology and coherency policy independently for Kria and U55C
+	- Question: which Kria HP/HPC ports and U55C HBM pseudo-channels should serve program, context, data, and telemetry regions?
+	- Acceptance: document allocation ownership, cache maintenance, port/bank mapping, sustained bandwidth, contention, SLR crossings, timing, and power; do not copy Kria's physical map to U55C.
+- [ ] T096g Define the compute/memory balance model and the minimum observability needed to evaluate it
+	- Question: are lanes, CUs, scheduler, memory, clock, and telemetry balanced for the selected workloads?
+	- Acceptance: publish peak compute, sustainable bandwidth, roofline position, IPC, lane utilization, stall causes, barrier/divergence cost, queue/cache/AXI counters, counter overhead, and revisit thresholds.
 - [ ] T097 Freeze RV32IMF little-endian, minimal custom SIMT instructions, the kernel ABI, and ELF/program-image rules
 	- Acceptance: a validator rejects unsupported opcodes, relocations, compressed instructions, address widths, and sizes before deployment.
 - [ ] T098 Reconcile and generate the canonical CSR and memory map across documentation, driver, HLS metadata, and Vivado
@@ -455,12 +476,12 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 - [ ] T099 Make `config/arch_config.yaml` a schema-validated source for SystemC, HLS, and scripts with Kria and U55C profiles
 	- Acceptance: implemented capabilities are separated from aspirational values and generated consumers cannot drift.
 - [ ] T100 Set correctness, timing, resource, scalability, and model-accuracy budgets for the baseline microarchitecture
-	- Acceptance: bit-exact integer/control/memory, declared FP ULP limits, exact event counts, `WNS >= 0`, zero critical DRCs, at most 70% limiting-resource use, a 2/4/8-CU sweep, and median calibrated model error at most 15%.
+	- Acceptance: bit-exact integer/control/memory, declared FP ULP limits, exact event counts, `WNS >= 0`, zero critical DRCs, at most 70% limiting-resource use, a 2/4/8-CU sweep, measured roofline ceilings, and median calibrated model error at most 15%.
 
 ### 8.2 Model, Microarchitecture, and Verification
 
 - [ ] T101 Define a common execution signature and trace schema for SystemC, HLS/cosim, RTL, and hardware
-	- Acceptance: kernel/config hashes, geometry, final state, output digest, instructions, stalls, divergence/barriers, memory traffic, and faults use one schema.
+	- Acceptance: kernel/config hashes, geometry, final state, output digest, instructions, lane/issue utilization, stalls by cause, divergence/barriers, queue/cache/AXI traffic, and faults use one schema; high-volume trace bypasses AXI4-Lite.
 - [ ] T102 Select and harden the normative SystemC binary path and add parity tests using the same ELF and launch packet
 	- Acceptance: vector add, SAXPY, divergence, barrier/reduction, and memory stress agree with expected state; no undocumented cycle claims.
 - [ ] T103 Align the HLS accelerator core to the frozen ISA, CSR/memory, configuration, trace, and fault contracts
@@ -468,14 +489,14 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 - [ ] T104 Run C/RTL cosimulation and integrated AXI protocol verification with reset, backpressure, malformed launch, bounds, and fault paths
 	- Acceptance: use AXI VIP/cosim coverage first; add full UVM only for a documented uncovered risk.
 - [ ] T105 Automate HLS/Vivado design-space exploration and select a Kria baseline from reproducible 2/4/8-CU reports
-	- Acceptance: LUT/FF/BRAM/URAM/DSP, II/latency, WNS/Fmax, and bottlenecks are parsed and checked against T100.
+	- Acceptance: LUT/FF/BRAM/URAM/DSP, II/latency, WNS/Fmax, achieved bandwidth, IPC, memory-stall fraction, scaling efficiency, and the first saturated stage are parsed and checked against T096a-T100.
 
 ### 8.3 Kria End-to-End Hardware
 
 - [ ] T106 Make the Kria HLS export, block design, and driver conform to the generated CSR/memory contract
 	- Acceptance: remove the unimplemented abstract register map or provide a real RTL wrapper; keep Zynq PS details outside the core.
 - [ ] T107 Implement a coherent reserved-DDR transport through UIO/CMA/dma-buf or an equivalent controlled Linux interface
-	- Acceptance: ownership, alignment, address translation, and cache maintenance are tested; OCM remains diagnostic only.
+	- Acceptance: ownership, alignment, address translation, cache maintenance, H2D/D2H bandwidth, CPU cost, and transfer/compute overlap are tested; OCM remains diagnostic only.
 - [ ] T108 Package bit/bin, hardware metadata/device tree, validated ELF, configuration, versions, and hashes for reproducible deployment
 	- Acceptance: `scripts/deploy_kria.sh` fails on a skipped kernel, timeout, fault, or result mismatch.
 - [ ] T109 Execute the first real physical gate on KV260/KR260 with vector add and SAXPY
@@ -488,20 +509,21 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 ### 8.4 Alveo U55C
 
 - [ ] T112 Timebox U55C integration spikes for Vitis acceleration/XRT and RTL kernel using the same core and launch semantics
-	- Acceptance: compare HBM mapping, PCIe path, interrupts, packaging, build/debug effort, profiling, overhead, and maintenance.
+	- Acceptance: compare HBM mapping, number and width of memory ports, PCIe path, command submission, interrupts, packaging, build/debug effort, profiling, overhead, and maintenance.
 - [ ] T113 Select one U55C shell route through a quantified ADR and stop developing the rejected prototype
 - [ ] T114 Restore U55C support with 64-bit addresses, HBM pseudo-channel placement, CU replication, and clock-domain constraints
+	- Acceptance: region-to-bank mapping and CU-to-port topology are explicit; a single shared memory port requires measured evidence that it does not cap the selected profile.
 - [ ] T115 [P] Implement an Alveo backend behind the common host/runtime API without distributed platform `#ifdef` blocks
 - [ ] T116 Pass U55C synthesis/link, timing/DRC, emulation where applicable, and the physical T109-T110 gates when hardware is available
 - [ ] T117 Sweep CUs, HBM banks, workloads, and sizes on U55C and select the final T100-compliant configuration
-	- Acceptance: report SLR placement, congestion, bandwidth, occupancy, timing, resources, and power.
+	- Acceptance: report SLR placement, congestion, per-bank and aggregate bandwidth, port utilization, occupancy, scaling efficiency, timing, resources, and power against the measured HBM ceiling.
 
 ### 8.5 Evaluation, eGPU, and Publication
 
 - [ ] T118 Freeze common workloads, datasets, inputs, result checkers, and precision rules
 	- Minimum set: vector add, SAXPY, reduction, divergence, cache/bandwidth, BFS, and one compute-bound GEMM or convolution workload.
 - [ ] T119 Build one multiplatform statistical harness with versioned datasets/seeds, warmups, and at least 30 measured samples
-	- Acceptance: report median, p95, dispersion, transfer/kernel separation, counters, power/energy, and tool/device metadata.
+	- Acceptance: report median, p95, dispersion, submission/H2D/kernel/D2H separation, counters, roofline position, power/energy, and tool/device metadata.
 - [ ] T120 Compare models, Kria, and U55C for correctness, absolute performance, scalability, resource efficiency, and energy
 	- Acceptance: simulated and physical time are never combined or presented as equivalent.
 - [ ] T121 [P] Produce a bounded eGPU/bpftime research note and decide whether common eBPF software or a methodological comparison is defensible
@@ -523,7 +545,7 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 ### Phase 8 Dependencies
 
 - T094 and T095 can proceed after T093; T096 starts the architecture freeze.
-- T097 depends on T096; T098 depends on T096-T097; T100 depends on T097-T099.
+- T096a-T096g are decision gates within T096. T097 depends on T096/T096a; T098 depends on T096b-T096f and T097; T100 depends on T096g and T097-T099.
 - T101-T105 proceed in order, with T102 depending on the frozen contracts and trace schema.
 - T106-T111 are the sequential Kria physical path.
 - T112 may start after T098-T100; T113 selects the shell before T114-T117. T114 and T115 may run in parallel.

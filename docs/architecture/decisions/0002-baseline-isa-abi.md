@@ -1,7 +1,7 @@
 # ADR-0002: Baseline ISA and Kernel ABI
 
 - **Status**: Accepted
-- **Date**: 2026-08-21
+- **Date**: 2026-08-20
 
 ## Context
 

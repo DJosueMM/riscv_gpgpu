@@ -12,6 +12,7 @@ Scope:
 |---|---|
 | `ARCHITECTURE.md` | High-level architecture narrative |
 | `platform_strategy.md` | Portable core, Kria/U55C roles, gates, and T093-T128 roadmap |
+| `performance_strategy.md` | Performance questions, analytical ceilings, experiments, and stop conditions |
 | `decisions/` | Architecture decision records and proposed decisions |
 | `interfaces.md` | Cross-component interface contracts |
 | `isa.md` | ISA and execution model notes |

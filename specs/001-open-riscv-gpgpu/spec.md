@@ -2,7 +2,7 @@
 
 **Status**: Active planning baseline
 **Created**: 2026-06-27  
-**Rebaselined**: 2026-08-21
+**Rebaselined**: 2026-08-20
 **Document Owner**: Project Architecture Team  
 **Source**: RISC-V GPGPU Constitution v1.0.0
 
@@ -68,6 +68,7 @@ The following functional requirements shall govern the system.
 | REQ-017 | A physical FPGA validation shall load and launch a kernel, observe completion without a fault, copy results back, and verify them against expected output. | Register access, synthesis, and skipped execution do not prove accelerator correctness. | Mandatory | FPGA Test | Runtime, Driver, Platform Shell, Accelerator Core |
 | REQ-018 | The Kria platform shall provide the first physical bring-up path and Alveo U55C shall provide the final scale-out path after a measured shell-selection spike. | The available board enables early validation while U55C supplies PCIe/HBM scale. | Mandatory | Inspection, FPGA Test | Platform Shells, Platform Backends |
 | REQ-019 | SystemC, HLS/cosim, RTL, and hardware runs shall emit a comparable execution signature including identity, completion/fault state, output digest, and architectural counters. | Cross-level parity is required to locate model and implementation drift. | Mandatory | Simulation, FPGA Test | Models, HLS, RTL, Observability |
+| REQ-020 | Control, command, bulk-data, internal request, and trace planes shall use separate contracts selected from workload requirements, analytical ceilings, and measured alternatives. | Interface names and widths alone do not guarantee useful throughput or latency. | Mandatory | Inspection, Benchmark, FPGA Test | Host API, Platform Backends, Platform Shells, Memory System, Observability |
 
 ## 6. Non-Functional Requirements
 
@@ -223,6 +224,7 @@ Each functional and non-functional requirement shall be traceable to its origina
 | REQ-017 | Physical end-to-end execution | Kernel load, launch, completion, readback, and result evidence |
 | REQ-018 | Kria bring-up and U55C scale-out | Platform ADRs, builds, and physical validation |
 | REQ-019 | Cross-level execution signatures | SystemC, HLS/RTL, and FPGA parity reports |
+| REQ-020 | Workload-driven control/data/trace plane selection | T096a-T096g measurements, ADR-0006, and design-space reports |
 | NFR-001 | Performance measurement and benchmarking | Benchmark results |
 | NFR-002 | Scalability | Simulation and benchmark evidence |
 | NFR-003 | Configurability | Inspection and simulation evidence |

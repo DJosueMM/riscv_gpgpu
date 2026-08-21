@@ -1,7 +1,7 @@
 # FPGA Platform Strategy and End-to-End Roadmap
 
 **Status**: Approved planning baseline
-**Last updated**: 2026-08-21
+**Last updated**: 2026-08-20
 **Task ledger**: [tasks.md](../../specs/001-open-riscv-gpgpu/tasks.md)
 
 This document defines the target architecture and the implementation sequence
@@ -103,6 +103,20 @@ or checked mirrors in software, HLS, and platform tooling:
 The current abstract `ID/CTRL/STATUS` map and the HLS-generated AXI-Lite banks
 are not assumed to be equivalent. Task T098 must reconcile them before the
 driver-to-hardware path can be considered conformant.
+
+### 4.1 Performance and Interface Decisions
+
+Interface selection follows the measurable question gates in the
+[performance strategy](performance_strategy.md). AXI4-Lite is the default for
+low-rate control and bounded counter snapshots, not for program, data, result,
+or trace traffic. Full AXI4 and managed buffers/DMA carry bulk transfers;
+ready/valid streams connect internal dataflow stages.
+
+The current bottleneck hypothesis is the one-outstanding-per-CU, N:1 memory
+request path, not the control bus. T096a-T096g must define the workload
+envelope, measure control overhead and memory ceilings, test concurrency/cache
+alternatives, map platform memory topology, and publish a compute/memory
+balance model before T098-T105 freeze or scale the implementation.
 
 ## 5. Quantitative Gates
 
@@ -222,3 +236,4 @@ execution. It is bring-up evidence, not an end-to-end hardware validation.
 - [ADR-0003: Canonical CSR and Memory Contract](decisions/0003-csr-memory-contract.md)
 - [ADR-0004: Kria Memory Transport](decisions/0004-kria-memory-transport.md)
 - [ADR-0005: Alveo U55C Shell Selection](decisions/0005-alveo-shell-selection.md)
+- [ADR-0006: Control, Data, and Trace Plane Separation](decisions/0006-control-data-plane-separation.md)

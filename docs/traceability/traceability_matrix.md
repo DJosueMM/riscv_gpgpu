@@ -18,6 +18,7 @@ Validated requirements-to-evidence chain for major artifacts.
 | REQ-017 | Physical kernel load, launch, completion, readback, and result verification | Kria and U55C platform paths | T109-T110 and T116 physical reports | Planned; current Kria PASS invalid for this gate |
 | REQ-018 | Kria bring-up and measured U55C scale-out selection | `docs/architecture/platform_strategy.md`, ADR-0004, ADR-0005 | T107-T117 decision/build/hardware evidence | Planned |
 | REQ-019 | Comparable execution signature across SystemC, HLS/RTL, and hardware | Observability contract to be defined by T101 | T101-T103 and T110 parity reports | Planned |
+| REQ-020 | Workload-driven separation and selection of control, data, request, and trace planes | `docs/architecture/performance_strategy.md`, ADR-0006 | T096a-T096g, T100-T105, and platform bandwidth/scaling reports | Planned; plane separation accepted |
 | NFR-008 | Explicit evidence maturity with no false PASS on skipped prerequisites | Task ledger and traceability process | T093 audit, T108 deployment failure paths, T128 release gate | In progress |
 | NFR-009 | Balanced statistical evaluation of correctness, performance, scalability, resources, and energy | Benchmark harness to be defined by T118-T119 | T119-T123 raw data and reports | Planned |
 
@@ -49,6 +50,7 @@ Validated requirements-to-evidence chain for major artifacts.
 ## Gaps
 
 - The documented abstract CSR map and generated HLS control banks have not been proven equivalent; T098 owns reconciliation.
+- The current one-outstanding-per-CU, N:1 runtime memory path has not demonstrated useful bandwidth scaling; T096c-T096g and T105 own the decision evidence.
 - Kria DDR mapping and coherent transport are unresolved; T107 owns the transport contract.
 - Hardware execution evidence is pending. The current Kria report is invalid for T087-T089/T092 and REQ-017 because it skipped the kernel.
 - U55C shell selection and all U55C physical evidence remain planned pending T112-T117 and hardware access.

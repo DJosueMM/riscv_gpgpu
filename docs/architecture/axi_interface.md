@@ -1,11 +1,38 @@
 # GPGPU AXI Interface Definition (Kria KV260/KR260)
 
-**Task**: T050 · **Status**: Defined · **Code mirror**: [driver/src/fpga_regs.h](../../driver/src/fpga_regs.h)
+**Task**: T050, superseded for reconciliation by T096b-T098
+**Status**: Provisional logical contract; not proven equivalent to generated HLS/Vivado interfaces
+**Code mirror**: [driver/src/fpga_regs.h](../../driver/src/fpga_regs.h)
 
 This document defines the hardware/software contract between the ARM PS
 (Cortex-A53, Linux userspace driver) and the PL GPGPU on the AMD Kria
 KV260/KR260. Any change to this contract must be applied simultaneously to
 `driver/src/fpga_regs.h` and to the HLS/RTL top-level ports.
+
+> **Conformance warning:** the `ID/CTRL/STATUS` map below is the intended
+> logical contract, not the verified physical map of the current bitstream.
+> The current Vivado design exposes multiple HLS-generated AXI4-Lite banks and
+> four full AXI masters through one SmartConnect/HPC0 path. T098 must either
+> generate all consumers from one description or implement a real RTL wrapper
+> before this document can return to `Defined` status.
+
+## Interface selection rule
+
+Per [ADR-0006](decisions/0006-control-data-plane-separation.md) and the
+[performance strategy](performance_strategy.md):
+
+- AXI4-Lite is the baseline for low-rate configuration, doorbell, status,
+   faults, interrupt control, and bounded counter snapshots.
+- AXI4-Lite is not used for program images, contexts, kernel buffers, results,
+   or high-volume traces.
+- Full AXI4 and managed buffers/DMA carry bulk traffic.
+- A descriptor queue plus AXI4-Lite doorbell replaces or complements direct
+   CSR launch only if T096b measurements show control overhead above 1% for a
+   target workload or a launch-rate requirement is missed.
+
+The control bus is not the current steady-state throughput hypothesis. The
+one-outstanding-per-CU, N:1 memory path and single Kria HPC port must be
+measured under T096c-T096g and T105 before changing widths or adding CUs.
 
 ---
 
@@ -48,7 +75,13 @@ memory** (device buffers allocated by the driver).
 Any AXI decode error, illegal instruction, or memory fault moves `STATUS` to
 `ERROR`; only `CTRL.RESET` leaves that state.
 
-## 3. AXI4 DMA channels (PL masters)
+## 3. Logical AXI4 Data Channels
+
+The two channels below describe logical program and data responsibilities.
+They are not current physical HLS port names. The present block design connects
+`gpgpu_scheduler` masters `m_axi_gmem0`, `m_axi_gmem1`, and `m_axi_gmem2` plus
+`memory_pipeline/m_axi_gmem` through one SmartConnect to Kria HPC0. T098 and
+T096f decide the final mapping.
 
 | Port         | Type        | Width | Purpose |
 |--------------|-------------|-------|---------|

@@ -1,7 +1,7 @@
 # ADR-0003: Canonical CSR and Memory Contract
 
 - **Status**: Proposed
-- **Date**: 2026-08-21
+- **Date**: 2026-08-20
 - **Decision task**: T098
 
 ## Context

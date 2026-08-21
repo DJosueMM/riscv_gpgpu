@@ -1,7 +1,7 @@
 # ADR-0001: Platform Roles and Portable Accelerator Core
 
 - **Status**: Accepted
-- **Date**: 2026-08-21
+- **Date**: 2026-08-20
 
 ## Context
 

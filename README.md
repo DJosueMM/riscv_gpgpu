@@ -30,6 +30,7 @@ platform shells. Kria is the first physical bring-up platform; Alveo U55C is
 the final scale-out target after a timeboxed XRT-versus-RTL shell comparison.
 
 - [Platform strategy and gates](docs/architecture/platform_strategy.md)
+- [Performance and interface decision strategy](docs/architecture/performance_strategy.md)
 - [Architecture decisions](docs/architecture/decisions/README.md)
 - [Execution plan](specs/001-open-riscv-gpgpu/plan.md#14-current-architecture-roadmap)
 - [Task ledger T093-T128](specs/001-open-riscv-gpgpu/tasks.md#phase-8-architecture-rebaseline-and-fpga-roadmap)

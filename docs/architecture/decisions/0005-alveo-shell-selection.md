@@ -1,7 +1,7 @@
 # ADR-0005: Alveo U55C Shell Selection
 
 - **Status**: Proposed
-- **Date**: 2026-08-21
+- **Date**: 2026-08-20
 - **Decision tasks**: T112-T113
 
 ## Context

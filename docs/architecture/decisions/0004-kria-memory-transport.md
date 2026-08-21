@@ -1,7 +1,7 @@
 # ADR-0004: Kria Memory Transport
 
 - **Status**: Proposed
-- **Date**: 2026-08-21
+- **Date**: 2026-08-20
 - **Decision task**: T107
 
 ## Context

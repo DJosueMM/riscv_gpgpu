@@ -2,7 +2,7 @@
 
 **Status**: Active execution plan
 **Created**: 2026-06-27  
-**Rebaselined**: 2026-08-21
+**Rebaselined**: 2026-08-20
 **Source Documents**: Constitution v1.0.0, System Specification v1.0.0  
 **Document Purpose**: Provide an implementation strategy for the full research and development lifecycle of the proposed FPGA-based open RISC-V GPGPU platform.
 
@@ -308,7 +308,7 @@ first physical correctness gates.
 | Phase | Tasks | Exit condition |
 |---|---|---|
 | Rebaseline | T093-T095 | Historical states and repository content are classified against explicit evidence |
-| Architecture freeze | T096-T100 | ISA/ABI, CSR/memory, configuration, and quantitative budgets have canonical definitions |
+| Architecture freeze | T096-T100 | Workload/performance questions, ISA/ABI, CSR/memory, configuration, and quantitative budgets have measured decisions and canonical definitions |
 | Model and microarchitecture | T101-T105 | Common traces, model/HLS parity, protocol verification, and Kria DSE pass |
 | Kria physical path | T106-T111 | Kernel load, execution, readback, SIMT tests, and benchmark evidence pass on the board |
 | Alveo U55C | T112-T117 | One shell is selected and the common physical/scalability gates pass when hardware is available |
@@ -334,6 +334,10 @@ is outside the critical path and T122 requires an explicit go/no-go decision.
 
 - **Contract gate**: generated or checked ISA, CSR, memory, and configuration
   consumers agree; unsupported ELFs are rejected before deployment.
+- **Architecture question gate**: T096a-T096g state workload, alternatives,
+  hypothesis, metrics, rejection threshold, experiment, and ADR. AXI4-Lite is
+  limited to low-rate control; command queues, widths, ports, concurrency,
+  caches, and memory topology are selected from measurements.
 - **Functional gate**: the same kernel, configuration, and input produce the
   expected execution signature across applicable model and hardware levels.
 - **Implementation gate**: post-route `WNS >= 0`, zero critical DRCs, and at
@@ -344,7 +348,8 @@ is outside the critical path and T122 requires an explicit go/no-go decision.
 - **Alveo gate**: a selected shell, reproducible build, and physical common
   suite pass when U55C hardware is available.
 - **Evaluation gate**: versioned inputs, warmups, at least 30 measured samples,
-  median, p95, dispersion, transfer/kernel separation, and energy metadata.
+  median, p95, dispersion, submission/H2D/kernel/D2H separation, roofline
+  position, scaling efficiency, and energy metadata.
 - **Release gate**: a clean clone passes documentation links, artifact hygiene,
   selected builds/tests, and one reproducible Kria evidence run.
 
