@@ -23,6 +23,17 @@ Component details live in each component README.
 | `docs/reproducibility/` | Reproducible environment and run procedures |
 | `specs/001-open-riscv-gpgpu/` | Spec, plan, and task checklist (source of truth) |
 
+## FPGA Architecture Roadmap
+
+The approved path separates a portable accelerator core from Kria and Alveo
+platform shells. Kria is the first physical bring-up platform; Alveo U55C is
+the final scale-out target after a timeboxed XRT-versus-RTL shell comparison.
+
+- [Platform strategy and gates](docs/architecture/platform_strategy.md)
+- [Architecture decisions](docs/architecture/decisions/README.md)
+- [Execution plan](specs/001-open-riscv-gpgpu/plan.md#14-current-architecture-roadmap)
+- [Task ledger T093-T128](specs/001-open-riscv-gpgpu/tasks.md#phase-8-architecture-rebaseline-and-fpga-roadmap)
+
 ## Quick Start
 
 ```bash
@@ -55,8 +66,9 @@ bash scripts/deploy_kria.sh --help
 ## Current Stability Snapshot
 
 - Core build and test flow is green in local CI-style runs.
-- Phase 7 Kria deployment path has code and tests in place.
-- Hardware execution on the physical board is still a separate step.
+- HLS IP export and the full KV260 Vivado bitstream flow pass locally.
+- Kria AXI-Lite bring-up succeeded, but DDR and kernel execution were skipped.
+- End-to-end physical kernel validation remains open and must not be reported as PASS.
 
 ## Project Status
 

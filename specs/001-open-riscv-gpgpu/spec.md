@@ -1,7 +1,8 @@
 # System Specification: FPGA-Based Open RISC-V GPGPU
 
-**Status**: Draft  
+**Status**: Active planning baseline
 **Created**: 2026-06-27  
+**Rebaselined**: 2026-08-21
 **Document Owner**: Project Architecture Team  
 **Source**: RISC-V GPGPU Constitution v1.0.0
 
@@ -62,6 +63,11 @@ The following functional requirements shall govern the system.
 | REQ-012 | The system shall provide a traceable record of requirements, design decisions, implementation artifacts, and verification evidence for each major feature. | Traceability is required by the constitution and supports research reproducibility. | Mandatory | Inspection | Documentation, Verification Infrastructure |
 | REQ-013 | The system shall support diagnostic and status reporting for execution failures, resource contention, and configuration errors. | Diagnostics improve maintainability and debugging. | Recommended | Simulation, FPGA Test | Runtime, Driver, Verification Infrastructure |
 | REQ-014 | The system shall permit architectural experimentation through parameter changes without requiring invasive redesign of unrelated subsystems. | Extensibility is a core project objective. | Recommended | Inspection, Simulation | Configuration Interface, Compute Units, Memory Hierarchy |
+| REQ-015 | The accelerator core shall preserve one board-independent execution contract behind separate Kria and Alveo platform shells and host backends. | A portable core prevents board transport details from changing architectural behavior. | Mandatory | Inspection, Conformance Test | Accelerator Core, Platform Shells, Runtime |
+| REQ-016 | The system shall use canonical, machine-checkable definitions for the ISA/ABI, CSR map, logical memory map, architectural configuration, and execution trace schema. | Generated or checked consumers prevent hardware/software interface drift. | Mandatory | Inspection, Conformance Test | ISA, Configuration, Driver, HLS, FPGA Shells |
+| REQ-017 | A physical FPGA validation shall load and launch a kernel, observe completion without a fault, copy results back, and verify them against expected output. | Register access, synthesis, and skipped execution do not prove accelerator correctness. | Mandatory | FPGA Test | Runtime, Driver, Platform Shell, Accelerator Core |
+| REQ-018 | The Kria platform shall provide the first physical bring-up path and Alveo U55C shall provide the final scale-out path after a measured shell-selection spike. | The available board enables early validation while U55C supplies PCIe/HBM scale. | Mandatory | Inspection, FPGA Test | Platform Shells, Platform Backends |
+| REQ-019 | SystemC, HLS/cosim, RTL, and hardware runs shall emit a comparable execution signature including identity, completion/fault state, output digest, and architectural counters. | Cross-level parity is required to locate model and implementation drift. | Mandatory | Simulation, FPGA Test | Models, HLS, RTL, Observability |
 
 ## 6. Non-Functional Requirements
 
@@ -74,6 +80,8 @@ The following functional requirements shall govern the system.
 | NFR-005 | The system shall be maintainable through clear documentation, explicit interfaces, and traceable design decisions. | Maintainability supports long-term project survival. | Mandatory | Inspection | Documentation, Repository Structure |
 | NFR-006 | The system shall be portable across supported toolchains and host environments where the required dependencies are available. | Portability improves collaboration and reproducibility. | Recommended | Inspection, Simulation | Toolchain, Runtime, Driver |
 | NFR-007 | The system shall support reproducible builds, simulations, tests, and benchmark runs. | Reproducibility is central to the research mission. | Mandatory | Inspection, Benchmark | Toolchain, Verification Infrastructure |
+| NFR-008 | Evidence shall distinguish planned, implemented, simulated, synthesized, and validated-on-hardware states; a skipped prerequisite shall never report PASS. | Precise maturity states prevent unsupported research claims. | Mandatory | Inspection | Verification Infrastructure, Documentation |
+| NFR-009 | Evaluation shall report correctness, performance, scalability, resource efficiency, and energy using declared precision and statistical methods. | No single metric is sufficient to characterize the platform. | Mandatory | Benchmark, FPGA Test | Benchmarks, Verification Infrastructure |
 
 ## 7. Hardware Requirements
 
@@ -210,6 +218,11 @@ Each functional and non-functional requirement shall be traceable to its origina
 | REQ-012 | Traceability and documentation completeness | Inspection evidence |
 | REQ-013 | Diagnostics and error reporting | Simulation and FPGA test evidence |
 | REQ-014 | Extensibility through configuration | Inspection and simulation evidence |
+| REQ-015 | Portable core and platform separation | Architecture inspection and backend conformance tests |
+| REQ-016 | Canonical machine-checkable contracts | Generated-artifact and drift-detection tests |
+| REQ-017 | Physical end-to-end execution | Kernel load, launch, completion, readback, and result evidence |
+| REQ-018 | Kria bring-up and U55C scale-out | Platform ADRs, builds, and physical validation |
+| REQ-019 | Cross-level execution signatures | SystemC, HLS/RTL, and FPGA parity reports |
 | NFR-001 | Performance measurement and benchmarking | Benchmark results |
 | NFR-002 | Scalability | Simulation and benchmark evidence |
 | NFR-003 | Configurability | Inspection and simulation evidence |
@@ -217,3 +230,5 @@ Each functional and non-functional requirement shall be traceable to its origina
 | NFR-005 | Maintainability | Inspection evidence |
 | NFR-006 | Portability | Inspection and simulation evidence |
 | NFR-007 | Reproducibility | Inspection and benchmark evidence |
+| NFR-008 | Evidence maturity and no false PASS | Traceability and gate audit |
+| NFR-009 | Balanced, statistical evaluation | Raw samples, reports, and reproduction scripts |

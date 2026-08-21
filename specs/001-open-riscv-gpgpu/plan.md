@@ -1,7 +1,8 @@
 # Implementation Plan: FPGA-Based Open RISC-V GPGPU
 
-**Status**: Draft  
+**Status**: Active execution plan
 **Created**: 2026-06-27  
+**Rebaselined**: 2026-08-21
 **Source Documents**: Constitution v1.0.0, System Specification v1.0.0  
 **Document Purpose**: Provide an implementation strategy for the full research and development lifecycle of the proposed FPGA-based open RISC-V GPGPU platform.
 
@@ -280,3 +281,77 @@ The project shall maintain a reproducibility package containing:
 - documentation describing the expected environment and execution steps.
 
 Any researcher reproducing the work shall be able to reconstruct the implementation path from architecture definition to FPGA evaluation without relying on undocumented local changes.
+
+## 14. Current Architecture Roadmap
+
+This section governs current execution. The historical phases above describe
+the development method; the task ledger defines the actionable sequence and
+acceptance evidence.
+
+- Platform architecture: `docs/architecture/platform_strategy.md`
+- Actionable ledger: `specs/001-open-riscv-gpgpu/tasks.md`, T093-T128
+- Requirement evidence: `docs/traceability/traceability_matrix.md`
+
+### 14.1 Target Architecture
+
+The project shall maintain a board-independent accelerator core behind
+platform-specific shells and host backends. SystemC is the functional
+reference. HLS/RTL is the synthesizable microarchitecture. Kria is the first
+physical bring-up platform; Alveo U55C is the final scale-out platform.
+
+The initial binary contract is RV32IMF little-endian plus the minimum custom
+SIMT operations. A full LLVM target and RVV are later work and do not block the
+first physical correctness gates.
+
+### 14.2 Execution Phases
+
+| Phase | Tasks | Exit condition |
+|---|---|---|
+| Rebaseline | T093-T095 | Historical states and repository content are classified against explicit evidence |
+| Architecture freeze | T096-T100 | ISA/ABI, CSR/memory, configuration, and quantitative budgets have canonical definitions |
+| Model and microarchitecture | T101-T105 | Common traces, model/HLS parity, protocol verification, and Kria DSE pass |
+| Kria physical path | T106-T111 | Kernel load, execution, readback, SIMT tests, and benchmark evidence pass on the board |
+| Alveo U55C | T112-T117 | One shell is selected and the common physical/scalability gates pass when hardware is available |
+| Evaluation and publication | T118-T123 | Common workloads and statistical reports are reproducible from raw data |
+| Cleanup and release | T124-T128 | A clean clone reproduces the selected flows and one physical Kria evidence chain |
+
+### 14.3 Critical Dependencies
+
+1. Freeze architecture boundaries before ISA/ABI and CSR/memory contracts.
+2. Freeze contracts and configuration before model/HLS parity or platform work.
+3. Pass protocol and implementation checks before the Kria physical gate.
+4. Select the U55C shell with a timeboxed XRT-versus-RTL spike before full
+   Alveo integration.
+5. Freeze workloads and the statistical harness before cross-platform claims.
+6. Use proven paths and the repository inventory before deleting obsolete
+   content or declaring a release.
+
+T112 may begin after T098-T100, but physical U55C closure follows Kria
+validation. T114 and T115 may run in parallel after T113. eGPU research in T121
+is outside the critical path and T122 requires an explicit go/no-go decision.
+
+### 14.4 Evidence Gates
+
+- **Contract gate**: generated or checked ISA, CSR, memory, and configuration
+  consumers agree; unsupported ELFs are rejected before deployment.
+- **Functional gate**: the same kernel, configuration, and input produce the
+  expected execution signature across applicable model and hardware levels.
+- **Implementation gate**: post-route `WNS >= 0`, zero critical DRCs, and at
+  most 70% use of the limiting resource for the selected baseline.
+- **Kria gate**: vector add, SAXPY, divergence, barrier/reduction, and memory
+  stress complete with physical result verification. A skipped DDR mapping or
+  skipped kernel is a failed gate.
+- **Alveo gate**: a selected shell, reproducible build, and physical common
+  suite pass when U55C hardware is available.
+- **Evaluation gate**: versioned inputs, warmups, at least 30 measured samples,
+  median, p95, dispersion, transfer/kernel separation, and energy metadata.
+- **Release gate**: a clean clone passes documentation links, artifact hygiene,
+  selected builds/tests, and one reproducible Kria evidence run.
+
+### 14.5 Scope Boundaries
+
+Full UVM, a production-grade kernel driver, RVV, a complete LLVM target,
+multi-GPU support, and additional Alveo boards are out of scope unless a
+documented coverage or research requirement changes the decision. eGPU is a
+research contrast for eBPF-to-PTX instrumentation, not an equivalent compute
+accelerator unless T121 establishes a defensible common workload.

@@ -391,9 +391,10 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 	- Verification: both commands exit `0`; `component.xml` exists for both IPs under `build/ip_export/**/solution1/impl/ip/`.
 	- Done: both HLS exports pass on Vitis 2026.1 after environment and `set_top` fixes; `PASS: memory_pipeline IP exported` and `PASS: gpgpu_scheduler IP exported` confirmed in logs.
 
-- [ ] T086 [US2] Build full KV260 Vivado project and bitstream from batch Tcl flow
+- [x] T086 [US2] Build full KV260 Vivado project and bitstream from batch Tcl flow
 	- Required: run `vivado -mode batch -source fpga/scripts/build_all.tcl`.
 	- Verification: bitstream artifact generated in `build/vivado_kv260/`; no fatal errors in synthesis/implementation logs.
+	- Done: Vitis/Vivado 2026.1 completed synthesis, implementation, and bitstream generation. This is implementation evidence, not physical kernel-execution evidence.
 
 - [ ] T087 [US2] Deploy generated bitstream + kernel ELF to Kria and execute smoke test
 	- Required: run `scripts/deploy_kria.sh --bitstream <bit.bin> --kernel <kernel.elf> --test test_host_api --host <user@kria-ip>`.
@@ -412,15 +413,122 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 	- Verification: `scripts/report_hls_resources.sh` reports both profiles; baseline and demo numbers are reproducible from generated HLS reports.
 	- Done: baseline vs `demo_small_shared` profile measured. Combined totals: BRAM 224→210, LUT 96279→96126, FF 60130→59856, DSP 222→222, URAM 16→16; clocks unchanged (`sched 3.816ns`, `mem 3.650ns`).
 
-- [ ] T091 [US2] Select demo synthesis profile and run full Vivado implementation with utilization/timing reports
+- [x] T091 [US2] Select demo synthesis profile and run full Vivado implementation with utilization/timing reports
 	- Required: choose baseline vs demo profile (`tests/fpga/export_*_ip*.tcl`) and run `vivado -mode batch -source fpga/scripts/build_all.tcl`.
 	- Verification: post-implementation utilization and timing reports collected under `build/vivado_kv260/`; timing met or violations documented with mitigation plan.
+	- Done: the selected KV260 flow completed through bitstream generation. Generated reports remain untracked and must be recaptured in curated evidence before release.
 
 - [ ] T092 [US2] Validate selected profile on Kria and freeze demo bitstream
 	- Required: deploy chosen bitstream + kernel via `scripts/deploy_kria.sh`; run smoke + one representative workload.
 	- Verification: PASS report saved in `docs/verification/kria_results.md` and demo bitstream filename/hash recorded.
 
 **Checkpoint**: End-to-end CUDA → RISC-V ELF → ARM host → FPGA GPGPU → results verified on Kria hardware.
+
+> **Evidence correction (2026-08-21):** T050-T055 establish documentation and
+> software paths, and T085/T086/T090/T091 establish HLS/Vivado implementation.
+> They do not prove physical kernel execution. The current Kria report skipped
+> DDR and kernel execution, so its PASS is invalid for T087-T089/T092 and those
+> tasks remain open. T093-T128 are the current execution ledger; earlier phases
+> are retained as project history.
+
+## Phase 8: Architecture Rebaseline and FPGA Roadmap
+
+**Canonical strategy**: `docs/architecture/platform_strategy.md`
+
+### 8.0 Rebaseline and Project Truth
+
+- [ ] T093 Audit every historical task and classify its evidence as `done`, `open`, `superseded`, or `invalid evidence`
+	- Correct at minimum T005, T025/T026, T050-T055, T063, and T079-T092; move long decision narratives to ADRs.
+- [ ] T094 Rebaseline `spec.md` and `plan.md` around the portable core, Kria bring-up, U55C target, RV32IMF baseline, and mandatory physical gates
+	- Acceptance: requirements, phases, dependencies, and evidence terms agree with the platform strategy.
+- [ ] T095 [P] Inventory tracked content as canonical source, compatibility wrapper, curated evidence, generated/ignored, obsolete, or removal candidate
+	- Acceptance: duplicate Tcl flows, register maps, runners, READMEs, and result snapshots have an explicit disposition before deletion.
+
+### 8.1 Architecture Freeze
+
+- [ ] T096 Rewrite the architecture around host/runtime, platform backend, platform shell, accelerator core, external memory, and observability boundaries
+	- Acceptance: reset, launch, completion, error ownership, and board-independent interfaces are explicit in `docs/architecture/interfaces.md` and ADRs.
+- [ ] T097 Freeze RV32IMF little-endian, minimal custom SIMT instructions, the kernel ABI, and ELF/program-image rules
+	- Acceptance: a validator rejects unsupported opcodes, relocations, compressed instructions, address widths, and sizes before deployment.
+- [ ] T098 Reconcile and generate the canonical CSR and memory map across documentation, driver, HLS metadata, and Vivado
+	- Acceptance: offsets, widths, access modes, reset values, regions, ownership, coherence, and 32/64-bit addressing pass automated conformance checks.
+- [ ] T099 Make `config/arch_config.yaml` a schema-validated source for SystemC, HLS, and scripts with Kria and U55C profiles
+	- Acceptance: implemented capabilities are separated from aspirational values and generated consumers cannot drift.
+- [ ] T100 Set correctness, timing, resource, scalability, and model-accuracy budgets for the baseline microarchitecture
+	- Acceptance: bit-exact integer/control/memory, declared FP ULP limits, exact event counts, `WNS >= 0`, zero critical DRCs, at most 70% limiting-resource use, a 2/4/8-CU sweep, and median calibrated model error at most 15%.
+
+### 8.2 Model, Microarchitecture, and Verification
+
+- [ ] T101 Define a common execution signature and trace schema for SystemC, HLS/cosim, RTL, and hardware
+	- Acceptance: kernel/config hashes, geometry, final state, output digest, instructions, stalls, divergence/barriers, memory traffic, and faults use one schema.
+- [ ] T102 Select and harden the normative SystemC binary path and add parity tests using the same ELF and launch packet
+	- Acceptance: vector add, SAXPY, divergence, barrier/reduction, and memory stress agree with expected state; no undocumented cycle claims.
+- [ ] T103 Align the HLS accelerator core to the frozen ISA, CSR/memory, configuration, trace, and fault contracts
+	- Acceptance: decode, scheduling, reconvergence, barriers, contexts, caches, bounds, and faults have assertions and parity coverage.
+- [ ] T104 Run C/RTL cosimulation and integrated AXI protocol verification with reset, backpressure, malformed launch, bounds, and fault paths
+	- Acceptance: use AXI VIP/cosim coverage first; add full UVM only for a documented uncovered risk.
+- [ ] T105 Automate HLS/Vivado design-space exploration and select a Kria baseline from reproducible 2/4/8-CU reports
+	- Acceptance: LUT/FF/BRAM/URAM/DSP, II/latency, WNS/Fmax, and bottlenecks are parsed and checked against T100.
+
+### 8.3 Kria End-to-End Hardware
+
+- [ ] T106 Make the Kria HLS export, block design, and driver conform to the generated CSR/memory contract
+	- Acceptance: remove the unimplemented abstract register map or provide a real RTL wrapper; keep Zynq PS details outside the core.
+- [ ] T107 Implement a coherent reserved-DDR transport through UIO/CMA/dma-buf or an equivalent controlled Linux interface
+	- Acceptance: ownership, alignment, address translation, and cache maintenance are tested; OCM remains diagnostic only.
+- [ ] T108 Package bit/bin, hardware metadata/device tree, validated ELF, configuration, versions, and hashes for reproducible deployment
+	- Acceptance: `scripts/deploy_kria.sh` fails on a skipped kernel, timeout, fault, or result mismatch.
+- [ ] T109 Execute the first real physical gate on KV260/KR260 with vector add and SAXPY
+	- Acceptance: H2D, program/context load, RUNNING/DONE, D2H, and element-by-element validation all occur on the board.
+- [ ] T110 Validate divergence, barrier/reduction, shared memory, memory stress, counters, and faults on Kria
+	- Acceptance: SystemC, HLS, and hardware execution signatures meet the T100 tolerance rules.
+- [ ] T111 Run the compatible Rodinia subset on Kria and publish curated evidence
+	- Acceptance: separate compile/load/H2D/kernel/D2H/end-to-end timing and record timing, resources, power where available, hashes, and raw-log references.
+
+### 8.4 Alveo U55C
+
+- [ ] T112 Timebox U55C integration spikes for Vitis acceleration/XRT and RTL kernel using the same core and launch semantics
+	- Acceptance: compare HBM mapping, PCIe path, interrupts, packaging, build/debug effort, profiling, overhead, and maintenance.
+- [ ] T113 Select one U55C shell route through a quantified ADR and stop developing the rejected prototype
+- [ ] T114 Restore U55C support with 64-bit addresses, HBM pseudo-channel placement, CU replication, and clock-domain constraints
+- [ ] T115 [P] Implement an Alveo backend behind the common host/runtime API without distributed platform `#ifdef` blocks
+- [ ] T116 Pass U55C synthesis/link, timing/DRC, emulation where applicable, and the physical T109-T110 gates when hardware is available
+- [ ] T117 Sweep CUs, HBM banks, workloads, and sizes on U55C and select the final T100-compliant configuration
+	- Acceptance: report SLR placement, congestion, bandwidth, occupancy, timing, resources, and power.
+
+### 8.5 Evaluation, eGPU, and Publication
+
+- [ ] T118 Freeze common workloads, datasets, inputs, result checkers, and precision rules
+	- Minimum set: vector add, SAXPY, reduction, divergence, cache/bandwidth, BFS, and one compute-bound GEMM or convolution workload.
+- [ ] T119 Build one multiplatform statistical harness with versioned datasets/seeds, warmups, and at least 30 measured samples
+	- Acceptance: report median, p95, dispersion, transfer/kernel separation, counters, power/energy, and tool/device metadata.
+- [ ] T120 Compare models, Kria, and U55C for correctness, absolute performance, scalability, resource efficiency, and energy
+	- Acceptance: simulated and physical time are never combined or presented as equivalent.
+- [ ] T121 [P] Produce a bounded eGPU/bpftime research note and decide whether common eBPF software or a methodological comparison is defensible
+	- This task makes no implementation or performance-equivalence commitment.
+- [ ] T122 Run an NVIDIA/eGPU experiment only after T121 approval with pinned software, device, workload, and measured region
+	- Do not present instrumentation overhead as equivalent accelerator performance.
+- [ ] T123 Generate the pre-publication package from raw data with plots, tables, validity threats, hashes, replication scripts, and full traceability
+
+### 8.6 Cleanup and Release
+
+- [ ] T124 Canonicalize one entrypoint for software, simulation, HLS, Kria build/hardware, Alveo build/hardware, and benchmarks
+	- Acceptance: secondary scripts are documented wrappers or removed, and no skipped prerequisite can report PASS.
+- [ ] T125 [P] Pin external dependency URL, commit, and license; ignore generated output; retain only curated evidence with manifests and hashes
+- [ ] T126 Remove obsolete states, placeholders, duplicated contracts, and session narratives while preserving useful history in ADRs
+- [ ] T127 [P] Define CI gates for license-free checks, licensed nightly builds, and manual physical runs; skips remain unmet requirements
+- [ ] T128 Prove the release from a clean clone
+	- Acceptance: setup, build/test, HLS, selected FPGA builds, link checks, artifact hygiene, external licenses, and one Kria evidence run reproduce without local paths or secrets. U55C/eGPU remain pending until physically evidenced.
+
+### Phase 8 Dependencies
+
+- T094 and T095 can proceed after T093; T096 starts the architecture freeze.
+- T097 depends on T096; T098 depends on T096-T097; T100 depends on T097-T099.
+- T101-T105 proceed in order, with T102 depending on the frozen contracts and trace schema.
+- T106-T111 are the sequential Kria physical path.
+- T112 may start after T098-T100; T113 selects the shell before T114-T117. T114 and T115 may run in parallel.
+- T118 and T121 may start independently. T120 depends on T111, T116, and T119; T122 requires approval from T121.
+- T124-T127 use the T095 inventory and proven platform paths; T128 is the final clean-clone gate.
 
 ---
 

@@ -5,14 +5,24 @@
 - Bitstream: gpgpu_system_wrapper.bit.bin
 - Kernel ELF: saxpy.riscv.elf
 - Test: fpga_smoke_test
-- Result: **PASS**
+- Result: **CONTROL-PLANE BRING-UP ONLY; END-TO-END GATE NOT RUN**
+
+## Evidence classification
+
+This run proves that the bitstream loaded and AXI-Lite registers were
+accessible. DDR mapping failed, so the test skipped kernel loading, execution,
+completion, readback, and result verification. The emitted `PASS` line is
+preserved below as raw historical output, but it is **invalid evidence** for
+physical kernel execution tasks T087-T089/T092 and requirement REQ-017.
 
 ## Test output
 
 ```
 [sudo] password for ubuntu: Time taken to load BIN is 135.000000 Milli Seconds
-BIN FILE loaded through FPGA manager successfully
-GPGPU smoke test -- kernel: /home/ubuntu/riscv_gpgpu_deploy/saxpy.riscv.elf
+
+BIN FILE loaded through FPGA manager successfully
+
+GPGPU smoke test -- kernel: /home/ubuntu/riscv_gpgpu_deploy/saxpy.riscv.elf
 step 1: open /dev/mem
   fd=3
 step 2: mmap regs @ 0xa0000000
