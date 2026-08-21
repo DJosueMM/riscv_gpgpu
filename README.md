@@ -5,6 +5,8 @@ Open research platform for a RISC-V GPGPU flow spanning:
 - host software stack (launch/memory/runtime)
 - HLS/RTL path for Kria FPGA deployment
 
+This project is provided under the MIT License. See the [LICENSE](LICENSE) file for details.
+
 This README is intentionally brief and only covers repository entry points.
 Component details live in each component README.
 
@@ -55,6 +57,10 @@ bash scripts/deploy_kria.sh --help
 - Core build and test flow is green in local CI-style runs.
 - Phase 7 Kria deployment path has code and tests in place.
 - Hardware execution on the physical board is still a separate step.
+
+## Project Status
+
+This repository is intended as a collaborative open-source research platform. It is preconfigured for shared development, issue tracking, and pull requests.
 
 ## Where To Update Status
 
