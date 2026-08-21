@@ -7,10 +7,20 @@
 # opt-in target rather than bundled into the default ctest run.
 
 find_program(VITIS_HLS_EXECUTABLE vitis_hls)
+# Vitis 2026.1+ unified CLI: standalone vitis_hls no longer ships
+if(NOT VITIS_HLS_EXECUTABLE)
+    find_program(VITIS_RUN_EXECUTABLE vitis-run)
+    if(VITIS_RUN_EXECUTABLE)
+        set(VITIS_HLS_EXECUTABLE "${VITIS_RUN_EXECUTABLE}")
+        set(VITIS_HLS_CMD "${VITIS_RUN_EXECUTABLE}" --mode hls --tcl)
+    endif()
+else()
+    set(VITIS_HLS_CMD "${VITIS_HLS_EXECUTABLE}" -f)
+endif()
 
 if(BUILD_TESTS AND VITIS_HLS_EXECUTABLE)
     add_test(NAME fpga_flow_smoke_test
-        COMMAND ${VITIS_HLS_EXECUTABLE} -f ${CMAKE_CURRENT_SOURCE_DIR}/test_flow.tcl
+        COMMAND ${VITIS_HLS_CMD} ${CMAKE_CURRENT_SOURCE_DIR}/test_flow.tcl
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
     # csynth for both kernels, per installed board - see test_flow.tcl's header.
