@@ -7,6 +7,7 @@
 #
 # Usage:
 #   scripts/deploy_kria.sh --bitstream <file.bit.bin> --kernel <kernel.elf> --test <test_binary> \
+#       --metadata <design.hwh> --expect-marker <exact-text> \
 #       [--host <user@kria-ip>] [--report <path>] [--skip-build] [--sudo-pass <password>]
 #
 # The --sudo-pass option (or KRIA_SUDO_PASS env var) is forwarded to sudo -S
@@ -22,12 +23,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BITSTREAM=""
 KERNEL=""
 TEST_BIN=""
+METADATA=""
 KRIA_HOST="${KRIA_HOST:-ubuntu@kria}"
 REPORT="${REPO_ROOT}/docs/verification/kria_results.md"
 SKIP_BUILD=0
 BUILD_DIR="${REPO_ROOT}/build-kria-aarch64"
 REMOTE_DIR="/home/${KRIA_HOST%%@*}/riscv_gpgpu_deploy"
 KRIA_SUDO_PASS="${KRIA_SUDO_PASS:-}"
+EXPECT_MARKER=""
 
 usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
@@ -36,8 +39,10 @@ while [[ $# -gt 0 ]]; do
         --bitstream) BITSTREAM="$2"; shift 2 ;;
         --kernel)    KERNEL="$2"; shift 2 ;;
         --test)      TEST_BIN="$2"; shift 2 ;;
+        --metadata)  METADATA="$2"; shift 2 ;;
         --host)      KRIA_HOST="$2"; shift 2 ;;
         --report)    REPORT="$2"; shift 2 ;;
+        --expect-marker) EXPECT_MARKER="$2"; shift 2 ;;
         --skip-build) SKIP_BUILD=1; shift ;;
         --sudo-pass) KRIA_SUDO_PASS="$2"; shift 2 ;;
         -h|--help)   usage ;;
@@ -45,10 +50,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$BITSTREAM" && -n "$KERNEL" && -n "$TEST_BIN" ]] || {
-    echo "ERROR: --bitstream, --kernel, and --test are required." >&2; usage; }
+[[ -n "$BITSTREAM" && -n "$KERNEL" && -n "$TEST_BIN" && -n "$METADATA" && -n "$EXPECT_MARKER" ]] || {
+    echo "ERROR: --bitstream, --kernel, --test, --metadata, and --expect-marker are required." >&2; usage; }
 [[ -f "$BITSTREAM" ]] || { echo "ERROR: bitstream not found: $BITSTREAM" >&2; exit 1; }
 [[ -f "$KERNEL" ]]    || { echo "ERROR: kernel ELF not found: $KERNEL" >&2; exit 1; }
+[[ -f "$METADATA" ]]  || { echo "ERROR: hardware metadata not found: $METADATA" >&2; exit 1; }
 
 log() { echo "[deploy_kria] $*"; }
 
@@ -74,11 +80,28 @@ TEST_PATH="${BUILD_DIR}/bin/${TEST_BIN}"
 # ── 2. Transfer artifacts to the board ───────────────────────────────────────
 log "Transferring artifacts to ${KRIA_HOST}:${REMOTE_DIR}"
 ssh "$KRIA_HOST" "mkdir -p '$REMOTE_DIR'"
-scp "$BITSTREAM" "$KERNEL" "$TEST_PATH" "$KRIA_HOST:$REMOTE_DIR/"
+REMOTE_METADATA="$(ssh "$KRIA_HOST" '
+    model=$(tr -d "\000" </sys/firmware/devicetree/base/model 2>/dev/null || printf unknown)
+    printf "Model: %s\n" "$model"
+    printf "Kernel: %s\n" "$(uname -a)"
+    printf "Command line: %s\n" "$(cat /proc/cmdline)"
+')"
+scp "$BITSTREAM" "$KERNEL" "$TEST_PATH" "$METADATA" "$KRIA_HOST:$REMOTE_DIR/"
 
 BITSTREAM_NAME="$(basename "$BITSTREAM")"
 KERNEL_NAME="$(basename "$KERNEL")"
 TEST_NAME="$(basename "$TEST_PATH")"
+METADATA_NAME="$(basename "$METADATA")"
+BITSTREAM_SHA256="$(sha256sum "$BITSTREAM" | awk '{print $1}')"
+KERNEL_SHA256="$(sha256sum "$KERNEL" | awk '{print $1}')"
+TEST_SHA256="$(sha256sum "$TEST_PATH" | awk '{print $1}')"
+METADATA_SHA256="$(sha256sum "$METADATA" | awk '{print $1}')"
+SOURCE_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf unknown)"
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
+    SOURCE_STATE=DIRTY
+else
+    SOURCE_STATE=CLEAN
+fi
 
 # ── 3. Load the bitstream and run the test on the board ─────────────────────
 log "Loading bitstream and running ${TEST_NAME} on the board"
@@ -97,12 +120,25 @@ fi
 # Allow time for the PLL to lock and proc_sys_reset to release ap_rst_n.
 sleep 2
 chmod +x "$TEST"
-echo "$SUDO_PASS" | sudo -S env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
+if [[ -n "$SUDO_PASS" ]]; then
+    echo "$SUDO_PASS" | sudo -S env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
+else
+    sudo env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
+fi
 REMOTE
 then
     STATUS=FAIL
 fi
+if [[ "$STATUS" == PASS ]] && ! grep -Fq -- "$EXPECT_MARKER" "$RUN_LOG"; then
+    echo "ERROR: expected success marker not found: ${EXPECT_MARKER}" >>"$RUN_LOG"
+    STATUS=FAIL
+fi
 cat "$RUN_LOG"
+if [[ "$STATUS" == PASS ]]; then
+    REPORT_RESULT="VALIDATED ON HARDWARE"
+else
+    REPORT_RESULT="FAILED"
+fi
 
 # ── 4. Emit pass/fail report ──────────────────────────────────────────────────
 mkdir -p "$(dirname "$REPORT")"
@@ -110,11 +146,22 @@ mkdir -p "$(dirname "$REPORT")"
     echo "# Kria Deployment Report"
     echo
     echo "- Date: $(date -u '+%Y-%m-%d %H:%M UTC')"
+    echo "- Source commit: \`${SOURCE_COMMIT}\`"
+    echo "- Source tree: ${SOURCE_STATE}"
     echo "- Board: ${KRIA_HOST}"
+    while IFS= read -r metadata; do
+        echo "- ${metadata}"
+    done <<<"${REMOTE_METADATA}"
     echo "- Bitstream: ${BITSTREAM_NAME}"
+    echo "- Bitstream SHA-256: \`${BITSTREAM_SHA256}\`"
     echo "- Kernel ELF: ${KERNEL_NAME}"
+    echo "- Kernel SHA-256: \`${KERNEL_SHA256}\`"
     echo "- Test: ${TEST_NAME}"
-    echo "- Result: **${STATUS}**"
+    echo "- Test SHA-256: \`${TEST_SHA256}\`"
+    echo "- Hardware metadata: ${METADATA_NAME}"
+    echo "- Hardware metadata SHA-256: \`${METADATA_SHA256}\`"
+    echo "- Required marker: \`${EXPECT_MARKER}\`"
+    echo "- Result: **${REPORT_RESULT}**"
     echo
     echo "## Test output"
     echo
@@ -125,5 +172,5 @@ mkdir -p "$(dirname "$REPORT")"
 rm -f "$RUN_LOG"
 
 log "Report written to ${REPORT}"
-log "Result: ${STATUS}"
+log "Result: ${REPORT_RESULT}"
 [[ "$STATUS" == PASS ]]

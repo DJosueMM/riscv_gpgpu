@@ -380,9 +380,9 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 
 - [x] T055 [US2] Create Kria deployment script and cross-compilation Makefile in `scripts/deploy_kria.sh` and `fpga/`
 	- Required: cross-compile software stack for `aarch64-linux-gnu`; `scp` binary + kernel ELF to Kria; load FPGA bitstream via `fpgautil`; run test and capture output.
-	- Deliverable: `scripts/deploy_kria.sh` that takes `--bitstream`, `--kernel`, and `--test` arguments and produces a pass/fail report.
+	- Deliverable: `scripts/deploy_kria.sh` that takes bitstream, kernel, test, generated hardware metadata, and an exact success marker and produces a fail-closed report.
 	- Verification: `vector_add` (N=1024) produces correct results on Kria hardware; report captured in `docs/verification/kria_results.md`.
-	- Done: `scripts/deploy_kria.sh` (`--bitstream/--kernel/--test/--host/--report`) cross-compiles via `fpga/toolchain-aarch64.cmake` (+ `fpga/Makefile` wrapper), scp's artifacts, loads the bitstream with `fpgautil`, runs the test over SSH, and writes a pass/fail report to `docs/verification/kria_results.md` (board access now available; hardware execution evidence tracked by tasks below).
+	- Done: `scripts/deploy_kria.sh` cross-compiles via `fpga/toolchain-aarch64.cmake`, transfers hashed artifacts and HWH metadata, loads the bitstream with `fpgautil`, requires an exact result marker, and writes `VALIDATED ON HARDWARE` or `FAILED` to `docs/verification/kria_results.md` (physical execution evidence remains tracked below).
 
 ### Physical Bring-up (Kria Access Ready)
 
@@ -397,7 +397,7 @@ Update tasks and mark progress in `tasks.md` as work progresses; each subtask sh
 	- Done: Vitis/Vivado 2026.1 completed synthesis, implementation, and bitstream generation. This is implementation evidence, not physical kernel-execution evidence.
 
 - [ ] T087 [US2] Deploy generated bitstream + kernel ELF to Kria and execute smoke test
-	- Required: run `scripts/deploy_kria.sh --bitstream <bit.bin> --kernel <kernel.elf> --test test_host_api --host <user@kria-ip>`.
+	- Required: run `scripts/deploy_kria.sh --bitstream <bit.bin> --kernel <kernel.elf> --test <result-verifying-test> --metadata <design.hwh> --expect-marker '<exact-result-marker>' --host <user@kria-ip>`.
 	- Verification: deploy script exits `0` and test output reports PASS for `vector_add` (N=1024).
 
 - [ ] T088 [US2] Capture first physical-hardware evidence in `docs/verification/kria_results.md`

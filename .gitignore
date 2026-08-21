@@ -38,6 +38,8 @@ Makefile
 *.cmake
 # But DO track project CMake modules (cmake/ directory).
 !cmake/*.cmake
+# Cross-compilation toolchain used by the Kria deployment flow.
+!fpga/toolchain-aarch64.cmake
 # Hand-crafted Makefile for standalone SystemC test/benchmark builds
 !models/systemc/test/Makefile
 

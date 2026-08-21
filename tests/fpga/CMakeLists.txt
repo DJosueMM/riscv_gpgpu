@@ -6,6 +6,8 @@
 # and skips boards without installed device support, so it's a separate
 # opt-in target rather than bundled into the default ctest run.
 
+include(RiscvKernel)
+
 find_program(VITIS_HLS_EXECUTABLE vitis_hls)
 # Vitis 2026.1+ unified CLI: standalone vitis_hls no longer ships
 if(NOT VITIS_HLS_EXECUTABLE)
@@ -73,4 +75,28 @@ if(BUILD_TESTS)
         target_compile_definitions(fpga_rodinia_bench PRIVATE FPGA_TARGET)
     endif()
     install(TARGETS fpga_rodinia_bench RUNTIME DESTINATION bin)
+
+    # Minimal physical proof: one global store followed by host readback.
+    add_executable(kria_first_kernel_test kria_first_kernel_test.cpp)
+    target_compile_options(kria_first_kernel_test PRIVATE -std=c++17)
+    target_link_options(kria_first_kernel_test PRIVATE -static)
+    if(FPGA_TARGET)
+        target_compile_definitions(kria_first_kernel_test PRIVATE FPGA_TARGET)
+    endif()
+    install(TARGETS kria_first_kernel_test RUNTIME DESTINATION bin)
+
+    add_riscv_kernel(kria_sentinel_ocm
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/kernels/kria_sentinel.cpp"
+        ENTRY kria_sentinel
+        MARCH rv32imf
+        MABI ilp32
+        OCM_LINK
+    )
+    add_riscv_kernel(kria_sentinel_ddr
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/kernels/kria_sentinel.cpp"
+        ENTRY kria_sentinel
+        MARCH rv32imf
+        MABI ilp32
+        FPGA_LINK
+    )
 endif()

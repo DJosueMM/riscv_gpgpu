@@ -109,18 +109,17 @@ int main() {
     printf("  wrote 0, read back 0x%08x\n", rb);
 
     if (mmap_mem == nullptr) {
-        printf("[WARN] DDR mmap failed -- skipping kernel execution test\n");
-        printf("PASS: AXI registers reachable (kernel run skipped -- DDR mmap blocked by strict_devmem)\n");
+        fprintf(stderr, "[FAIL] DDR mmap failed -- kernel execution cannot be tested\n");
+        munmap(rmap, kRegBlockSize);
         close(fd);
-        return 0;
+        return 1;
     }
 
     // ── 6. Full kernel run would go here ────────────────────────────────────
     // TODO: implement ELF load + HLS register launch once DDR mmap works
-    printf("[INFO] DDR mmap OK -- kernel execution path not yet implemented in this test\n");
+    fprintf(stderr, "[FAIL] DDR mmap succeeded, but kernel execution is not implemented in this test\n");
     munmap(mmap_mem, static_cast<size_t>(kMemSize));
     munmap(rmap, kRegBlockSize);
     close(fd);
-    printf("PASS: hardware access OK\n");
-    return 0;
+    return 1;
 }

@@ -40,7 +40,13 @@ Expected benchmark evidence:
 ## Kria Deployment Reproduction (hardware)
 
 ```bash
-bash scripts/deploy_kria.sh --bitstream <bit.bin> --kernel <kernel.elf> --test <test_binary> --host <user@ip>
+bash scripts/deploy_kria.sh \
+	--bitstream <bit.bin> \
+	--kernel <kernel.elf> \
+	--test <test_binary> \
+	--metadata <design.hwh> \
+	--host <user@ip> \
+	--expect-marker '<exact hardware success marker>'
 ```
 
 Expected hardware evidence:
