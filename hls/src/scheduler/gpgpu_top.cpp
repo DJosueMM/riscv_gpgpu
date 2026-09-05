@@ -68,6 +68,21 @@ void gpgpu_scheduler(
     bundle=gmem2 \
     max_widen_bitwidth=RISCV_GPGPU_MAXI_MAX_WIDEN_BITWIDTH
 
+    // See the gpgpu_top.h declaration comment: each pointer's auto-generated
+    // control_r block is {DATA_0,DATA_1,CTRL} = 12 bytes (confirmed via
+    // regenerated RTL), so naturally-packed pointers land 12 bytes apart
+    // (0x10, 0x1c, 0x28) - NOT mod-16-alignable via interleaved dummy
+    // padding scalars (dummy scalars in this bundle also cost a fixed 8
+    // bytes each - {DATA_0,CTRL} - and 12/8 share no useful common multiple
+    // under mod 16, so no combination of dummies bridges a 12-byte pointer
+    // block to the next mod-16 boundary; confirmed empirically after two
+    // failed padding attempts). Instead, explicitly PIN each pointer's own
+    // register offset via the s_axilite `offset=` suboption, 16 bytes apart,
+    // bypassing the tool's automatic sequential packing entirely.
+#pragma HLS INTERFACE s_axilite port=program_ptr        bundle=control_r offset=0x10
+#pragma HLS INTERFACE s_axilite port=initial_regs_ptr0  bundle=control_r offset=0x20
+#pragma HLS INTERFACE s_axilite port=initial_regs_ptr1  bundle=control_r offset=0x30
+
 #pragma HLS INTERFACE s_axilite port=total_warps    bundle=control
 #pragma HLS INTERFACE s_axilite port=_reserved0      bundle=control
 #pragma HLS INTERFACE s_axilite port=program_len    bundle=control

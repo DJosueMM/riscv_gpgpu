@@ -324,6 +324,36 @@ inline void schedulerCore(
 // broken in-between offsets (0x18, 0x28, 0x38, 0x48) where nothing is ever
 // read or written. Do not remove these without re-verifying the CSR bug is
 // actually fixed upstream (Vitis HLS erratum / interconnect fix).
+//
+// SAME defect, SEPARATE auto-generated `control_r` bundle (the s_axilite
+// base-address registers Vitis creates automatically for the 3 `offset=slave`
+// m_axi pointers below, since none of them originally had an explicit
+// s_axilite pragma). Confirmed on real hardware (2026-09-04): with no
+// padding, Vitis packs each 64-bit pointer's {DATA_0, DATA_1, CTRL} at a
+// tight 12-byte stride (program_ptr @0x10/0x14/0x18, initial_regs_ptr0
+// @0x1c/0x20/0x24, initial_regs_ptr1 @0x28/0x2c/0x30) - landing
+// initial_regs_ptr0/1's DATA_0 (the actually-meaningful low word of each
+// pointer) on offsets 0x1c/0x28, both non-mod-16, so both silently fail to
+// latch and stay stuck at 0. program_ptr's own DATA_0 happens to already
+// sit at 0x10 (mod-16) and is unaffected.
+//
+// Tried interleaving `_reserved_ptrN` dummy scalars first (the same trick
+// used for the `control` bundle above) - did NOT work here. A dummy scalar
+// explicitly bundled into `control_r` alongside pointers also gets an
+// auto CTRL companion register in this bundle (8 bytes: DATA_0+CTRL, not
+// 4), while a pointer block is 12 bytes (DATA_0+DATA_1+CTRL); 12 and 8
+// share no combination that sums to a multiple of 16, so no number of
+// interleaved dummies can bridge a pointer block to the next mod-16
+// boundary. (Also: giving the dummy an explicit `bundle=control_r` while
+// the pointers only had an IMPLICIT bundle assignment doesn't even merge
+// them into one bundle - Vitis silently creates a second bundle
+// `control_r_r` instead, leaving the real pointers at their original,
+// unpadded, broken offsets.)
+//
+// ACTUAL FIX: give each pointer an explicit `s_axilite ... offset=` pragma,
+// pinning program_ptr/initial_regs_ptr0/initial_regs_ptr1's own DATA_0 at
+// 0x10/0x20/0x30 directly - bypassing the tool's automatic sequential
+// packing entirely instead of fighting its block-size arithmetic.
 void gpgpu_scheduler(
     instr_word_t* program_ptr,
 

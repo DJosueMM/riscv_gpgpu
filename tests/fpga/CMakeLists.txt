@@ -99,4 +99,13 @@ if(BUILD_TESTS)
         MABI ilp32
         FPGA_LINK
     )
+    # Diagnostic-only: no memory access at all, isolates whether a hang is in
+    # the mem_req_out/mem_resp_in round-trip or earlier in dispatch/decode.
+    add_riscv_kernel(kria_sentinel_nomem_ddr
+        SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/kernels/kria_sentinel_nomem.cpp"
+        ENTRY kria_sentinel_nomem
+        MARCH rv32imf
+        MABI ilp32
+        FPGA_LINK
+    )
 endif()

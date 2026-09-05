@@ -40,9 +40,15 @@ constexpr uint32_t kStatusFault = 1u << 2;
 constexpr uint32_t kStatusReady = 1u << 3;
 constexpr uint32_t kLaunchWriteRetries = 5;
 
+// control_r bundle layout after the mod-16 padding fix (gpgpu_top.cpp/.h):
+// each pointer's auto-generated {DATA_0,DATA_1,CTRL} block is padded out to
+// 16 bytes so every pointer's DATA_0 (the meaningful low word) lands on a
+// mod-16 offset. program_ptr already sat at 0x10 (mod16=0) unpadded;
+// initial_regs_ptr0/1 moved from 0x1c/0x28 (broken, silently discarded) to
+// 0x20/0x30 (mod16=0, confirmed latching on real hardware).
 constexpr uint32_t kPtrProgram = 0x10;
-constexpr uint32_t kPtrRegs0 = 0x1c;
-constexpr uint32_t kPtrRegs1 = 0x28;
+constexpr uint32_t kPtrRegs0 = 0x20;
+constexpr uint32_t kPtrRegs1 = 0x30;
 
 constexpr uint32_t kMemoryApCtrl = 0x00;
 constexpr uint32_t kMemoryGlobalBase = 0x10;
