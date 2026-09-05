@@ -47,6 +47,12 @@ typedef ap_uint<ADDR_BITS>   addr_t;
 typedef ap_int<32>           imm_t;
 typedef ap_uint<32>          barrier_id_t;
 
+// ── Canonical device status CSR bits (shared meaning with SystemC) ─────────
+constexpr uint8_t DEVICE_STATUS_BUSY  = 1u << 0;
+constexpr uint8_t DEVICE_STATUS_DONE  = 1u << 1;
+constexpr uint8_t DEVICE_STATUS_FAULT = 1u << 2;
+constexpr uint8_t DEVICE_STATUS_READY = 1u << 3;
+
 // ── Opcode (mirrors riscv_gpgpu::Opcode in types.h exactly - same values) ───
 enum class Opcode : uint8_t {
     ADD    = 0x00, SUB  = 0x01, AND = 0x02, OR = 0x03, XOR = 0x04, SLT = 0x05,

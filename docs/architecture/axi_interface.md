@@ -117,3 +117,79 @@ gpgpu@a0000000 {
 
 Clock and reset constraints for the PL implementation live in
 [fpga/constraints/kv260_gpgpu.xdc](../../fpga/constraints/kv260_gpgpu.xdc).
+
+---
+
+## 7. Control/Data Plane Split (V2)
+
+This section defines the target interface requested for higher throughput:
+
+- One independent AXI4-Lite slave dedicated to control and CSRs.
+- Separate AXI4 master path(s) dedicated to high-bandwidth payload data.
+
+The intent is to keep launch/status deterministic on a low-latency control bus
+while isolating payload traffic from control arbitration.
+
+### 7.1 Bus topology
+
+| Plane | Port | Protocol | Typical width | Purpose |
+|------|------|----------|---------------|---------|
+| Control | `s_axi_ctrl` | AXI4-Lite slave | 32-bit | Enable, launch config, doorbell, status, IRQ control, perf snapshots |
+| Data | `m_axi_data` (or `m_axi_data{0..N}`) | AXI4 master | 128/256-bit | Kernel/global-memory payload reads and writes |
+| Optional descriptor fetch | `m_axi_desc` | AXI4 master | 64/128-bit | Descriptor ring reads when queue mode is enabled |
+
+Recommended Kria mapping:
+
+- `s_axi_ctrl` via PS GP to a 4 KiB aperture.
+- `m_axi_data*` via HPC/HP path(s) to DDR through SmartConnect.
+- If only one HPC is available, prioritize bandwidth and burst tuning on
+   `m_axi_data*`; keep control isolated regardless.
+
+### 7.2 AXI4-Lite CSR map (V2)
+
+Mirror in code: [driver/src/fpga_regs.h](../../driver/src/fpga_regs.h) under
+`namespace riscv_gpgpu::fpga::v2`.
+
+| Offset | Name | Access | Description |
+|-------:|------|--------|-------------|
+| `0x000` | `ID` | RO | Device ID/version (`0x47505502` for V2). |
+| `0x004` | `CTRL` | RW | `ENABLE`, `START` (self-clear), `RESET`, `IRQ_CLEAR`. |
+| `0x008` | `STATUS` | RO | `BUSY`, `DONE`, `FAULT`, `READY`, `ENABLED`, `CONFIGURED`, `PLL_LOCKED`. |
+| `0x00C` | `IRQ_ENABLE` | RW | Interrupt mask bits (`DONE`, `FAULT`). |
+| `0x010` | `IRQ_STATUS` | RW1C | Latched IRQ cause bits (`DONE`, `FAULT`). |
+| `0x014` | `WARP_ID_OFFSET` | RW | Global warp start index for this device. |
+| `0x018` | `TOTAL_WARPS` | RW | Number of warps assigned to this device. |
+| `0x01C` | `PROGRAM_LEN` | RW | Program length in instruction words. |
+| `0x020` | `PC_INIT_LO` | RW | Entry PC low 32 bits (or descriptor ptr low). |
+| `0x024` | `PC_INIT_HI` | RW | Entry PC high 32 bits (or descriptor ptr high). |
+| `0x028` | `DESC_BASE_LO` | RW | Descriptor ring base low 32 bits. |
+| `0x02C` | `DESC_BASE_HI` | RW | Descriptor ring base high 32 bits. |
+| `0x030` | `DESC_STRIDE_BYTES` | RW | Bytes per descriptor entry. |
+| `0x034` | `DESC_COUNT` | RW | Number of valid descriptors in ring window. |
+| `0x038` | `DOORBELL` | WO | Submit descriptors / kick processing. |
+| `0x03C` | `CAPABILITIES` | RO | Feature bits (`DESC_QUEUE`, `SPLIT_AXI_DATA`, `64B_ADDR`). |
+| `0x040..0x058` | Perf counters | RO | 64-bit instruction/L1 counters split LO/HI, divergence counter. |
+
+Reserved space through `0xFFF` reads as `0` and ignores writes.
+
+### 7.3 Host launch handshake (V2)
+
+Required sequence:
+
+1. Read `STATUS.READY==1` and `STATUS.PLL_LOCKED==1`.
+2. Program `WARP_ID_OFFSET`, `TOTAL_WARPS`, `PROGRAM_LEN`, `PC_INIT_*` (or
+    descriptor registers for queue mode).
+3. Set `CTRL.ENABLE=1`.
+4. Re-check `STATUS.READY==1` and `STATUS.ENABLED==1`.
+5. Pulse `CTRL.START=1` (or write `DOORBELL` in descriptor mode).
+6. Wait for `STATUS.DONE` or IRQ; on fault, inspect diagnostics and clear with
+    `CTRL.RESET`/`CTRL.IRQ_CLEAR` as required.
+
+This matches the software-side staged flow already modeled in `SystemTopHLS`.
+
+### 7.4 Compatibility policy
+
+- V1 map remains valid for current bitstreams.
+- V2 is additive and should be selected by checking `ID` and/or
+   `CAPABILITIES`.
+- Driver may support both maps concurrently during migration.

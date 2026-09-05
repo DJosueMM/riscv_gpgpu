@@ -68,6 +68,30 @@ GPGPUTop::~GPGPUTop() {
 void GPGPUTop::launchKernel(uint32_t grid_x, uint32_t grid_y,
                               std::vector<Instruction> program,
                               uint32_t warp_id_offset) {
+    if (!pll_locked_) {
+        LOG_ERROR("launchKernel rejected: PLL not locked (POR active)");
+        busy_ = false;
+        done_ = false;
+        fault_ = false;
+        return;
+    }
+
+    done_ = false;
+    const uint32_t requested_warps = grid_x * grid_y;
+    const uint32_t max_resident = getMaxResidentWarps();
+    if (requested_warps > max_resident) {
+        fault_ = true;
+        busy_ = false;
+        LOG_ERROR("launchKernel rejected: requested_warps="
+                  + std::to_string(requested_warps)
+                  + " exceeds max_resident_warps="
+                  + std::to_string(max_resident));
+        return;
+    }
+
+    fault_ = false;
+    busy_ = true;
+
     LOG_INFO("launchKernel: grid=" + std::to_string(grid_x)
              + "x" + std::to_string(grid_y)
              + "  program=" + std::to_string(program.size()) + " instructions"
@@ -76,9 +100,35 @@ void GPGPUTop::launchKernel(uint32_t grid_x, uint32_t grid_y,
     kernel_program_       = std::move(program);
     kernel_start_warp_id_ = scheduler_->getNextWarpId();   // capture before submit
     warp_id_offset_       = warp_id_offset;
-    total_warps_          = grid_x * grid_y;
+    total_warps_          = requested_warps;
     scheduler_->submitKernel(0, grid_x, grid_y);
     kernel_launch_event_.notify(sc_core::SC_ZERO_TIME);
+}
+
+void GPGPUTop::resetControl() {
+    busy_ = false;
+    done_ = false;
+    fault_ = false;
+    total_warps_ = 0;
+    warp_id_offset_ = 0;
+    kernel_start_warp_id_ = 0;
+    kernel_program_.clear();
+    LOG_INFO("resetControl: cleared control/status state");
+}
+
+void GPGPUTop::setPllLocked(bool locked) {
+    if (pll_locked_ == locked) return;
+    pll_locked_ = locked;
+    if (!pll_locked_) {
+        resetControl();
+        LOG_INFO("setPllLocked: false (POR asserted)");
+    } else {
+        LOG_INFO("setPllLocked: true (POR released)");
+    }
+}
+
+bool GPGPUTop::isPllLocked() const {
+    return pll_locked_;
 }
 
 // ── Context builder ───────────────────────────────────────────────────────────
@@ -183,13 +233,36 @@ void GPGPUTop::simulationProcess() {
         }
 
         LOG_INFO("simulationProcess: all warps complete");
+        busy_ = false;
+        done_ = true;
     }
 }
 
 // ── Status and statistics ─────────────────────────────────────────────────────
 
 bool GPGPUTop::isKernelComplete() const {
-    return scheduler_->isComplete();
+    return done_;
+}
+
+bool GPGPUTop::isReady() const {
+    return pll_locked_ && !busy_ && !fault_;
+}
+
+bool GPGPUTop::hasFault() const {
+    return fault_;
+}
+
+uint32_t GPGPUTop::readStatusWord() const {
+    uint32_t status = 0;
+    if (busy_)  status |= DEVICE_STATUS_BUSY;
+    if (done_)  status |= DEVICE_STATUS_DONE;
+    if (fault_) status |= DEVICE_STATUS_FAULT;
+    if (isReady()) status |= DEVICE_STATUS_READY;
+    return status;
+}
+
+uint32_t GPGPUTop::getMaxResidentWarps() const {
+    return config_.num_compute_units * config_.max_warps_per_cu;
 }
 
 uint64_t GPGPUTop::getTotalCycles() const {

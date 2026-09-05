@@ -42,9 +42,15 @@ public:
     // assigning each GPU a non-overlapping warp_id_offset.
     void launchKernel(uint32_t grid_x, uint32_t grid_y,
                       std::vector<Instruction> program);
+    void resetControl();
+    void setPllLocked(bool locked);
+    bool isPllLocked() const;
 
     // ── Status ────────────────────────────────────────────────────────────────
     bool isComplete() const;
+    bool isReady() const;
+    bool isFault() const;
+    uint32_t readStatusWord(uint32_t gpu_idx) const;
 
     // ── Per-GPU access ────────────────────────────────────────────────────────
     uint32_t    getNumGPUs()        const { return static_cast<uint32_t>(gpus_.size()); }

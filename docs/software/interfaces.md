@@ -66,3 +66,26 @@ Example manifest:
 - The current implementation is a software prototype; the final hardware path may extend the manifest to include ISA-specific configuration and memory banking details.
 - This document should be updated once the runtime and driver binary protocol are stabilized.
 
+## Control/Data Plane Separation (AXI-Lite + AXI4)
+
+Runtime and driver are expected to use two independent planes:
+
+- Control plane: AXI4-Lite CSR window for launch configuration, status,
+  interrupts, and bounded counters.
+- Data plane: AXI4 high-bandwidth path for kernel payload buffers and bulk
+  transfers.
+
+The V2 CSR map is defined in [docs/architecture/axi_interface.md](../architecture/axi_interface.md)
+and mirrored in [driver/src/fpga_regs.h](../../driver/src/fpga_regs.h)
+under `riscv_gpgpu::fpga::v2`.
+
+### Required host sequence
+
+1. Poll `READY` and `PLL_LOCKED` on the AXI-Lite status register.
+2. Write launch CSRs (`WARP_ID_OFFSET`, `TOTAL_WARPS`, `PROGRAM_LEN`, entry
+   pointer or descriptor registers).
+3. Assert `ENABLE`.
+4. Re-check `READY` + `ENABLED`.
+5. Trigger `START` (or `DOORBELL` in descriptor mode).
+6. Complete via interrupt (`DONE/FAULT`) or status polling.
+

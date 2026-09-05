@@ -119,6 +119,18 @@ struct barrier_signal_t {
     bool kernel_done;  // whole kernel (every CU) finished - return to IDLE
 };
 
+using scheduler_status_t = ap_uint<8>;
+
+inline scheduler_status_t packSchedulerStatus(bool busy, bool done, bool fault,
+                                              bool ready) {
+    scheduler_status_t status = 0;
+    status[0] = busy;
+    status[1] = done;
+    status[2] = fault;
+    status[3] = ready;
+    return status;
+}
+
 // Free-running top-level task, same persistent-hardware model every other
 // free-running kernel in this project already uses. Mirrors mem_arbiter's
 // proven N:1/1:N array-of-streams shape (docs/hls/interfaces.md SS10.9) -
@@ -146,24 +158,36 @@ template<int N>
 inline void barrierCoreN(
     warp_id_t total_warps,
     bool&     start,
-    bool&     busy,
-    bool&     done,
-    bool&     fault,
+    hls::stream<scheduler_status_t>& status_out,
     hls::stream<WarpStatusCode>   (&events_in)[N],
     hls::stream<barrier_signal_t> (&signal_out)[N]
 ) {
     BarrierState barrier;
-    busy = false; done = false; fault = false;
+    bool busy_state = false;
+    bool done_state = false;
+    bool fault_state = false;
+    bool launch_armed = true;
+    scheduler_status_t last_status = packSchedulerStatus(false, false, false, true);
+    status_out.write(last_status);
 
     while (true) {
 #pragma HLS PIPELINE off
-        if (!busy) {
-            if (!start) continue;
+        if (!start) {
+            launch_armed = true;
+            if (!busy_state) {
+                done_state = false;
+                fault_state = false;
+            }
+        }
 
-            barrierLaunch(barrier, total_warps);
-            if (barrierLaunchFault(barrier)) { fault = true; continue; }
-
-            busy = true;
+        if (!busy_state) {
+            if (start && launch_armed) {
+                launch_armed = false;
+                done_state = false;
+                barrierLaunch(barrier, total_warps);
+                fault_state = barrierLaunchFault(barrier);
+                if (!fault_state) busy_state = true;
+            }
         } else {
         POLL_CU_EVENTS:
             for (int c = 0; c < N; ++c) {
@@ -187,8 +211,8 @@ inline void barrierCoreN(
             }
 
             if (barrierKernelComplete(barrier)) {
-                busy = false;
-                done = true;
+                busy_state = false;
+                done_state = true;
             SIGNAL_DONE:
                 for (int c = 0; c < N; ++c) {
 #pragma HLS UNROLL
@@ -199,6 +223,14 @@ inline void barrierCoreN(
                 }
             }
         }
+
+        bool ready_state = (!busy_state) && launch_armed && (!fault_state);
+        scheduler_status_t status =
+            packSchedulerStatus(busy_state, done_state, fault_state, ready_state);
+        if (status != last_status) {
+            status_out.write(status);
+            last_status = status;
+        }
     }
 }
 
@@ -207,11 +239,12 @@ inline void barrierCoreN(
 // barrierCoreN<NUM_CLUSTERS>(...) directly with the cluster-level streams.
 inline void barrierCore(
     warp_id_t total_warps,
-    bool& start, bool& busy, bool& done, bool& fault,
+    bool& start,
+    hls::stream<scheduler_status_t>& status_out,
     hls::stream<WarpStatusCode>   (&events_in)[NUM_CUS],
     hls::stream<barrier_signal_t> (&signal_out)[NUM_CUS]
 ) {
-    barrierCoreN<NUM_CUS>(total_warps, start, busy, done, fault,
+    barrierCoreN<NUM_CUS>(total_warps, start, status_out,
                           events_in, signal_out);
 }
 

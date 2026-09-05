@@ -106,6 +106,79 @@ TEST_F(FpgaDriverTest, RegisterWritesAreVisibleOnReadback) {
     EXPECT_EQ(driver_.readReg(REG_IRQ_ENABLE), IRQ_ENABLE_DONE);
 }
 
+TEST_F(FpgaDriverTest, OpenDetectsV2RegisterMapById) {
+    std::fstream regs(reg_path_, std::ios::in | std::ios::out | std::ios::binary);
+    const uint32_t id = v2::kDeviceId;
+    regs.seekp(v2::REG_ID);
+    regs.write(reinterpret_cast<const char*>(&id), sizeof(id));
+    regs.flush();
+
+    ASSERT_TRUE(driver_.open(config_));
+    EXPECT_TRUE(driver_.isV2Map());
+}
+
+TEST_F(FpgaDriverTest, V2ReadyEnableConfigureStartSequence) {
+    std::fstream regs(reg_path_, std::ios::in | std::ios::out | std::ios::binary);
+    const uint32_t id = v2::kDeviceId;
+    const uint32_t status = v2::STATUS_READY | v2::STATUS_PLL_LOCKED;
+    regs.seekp(v2::REG_ID);
+    regs.write(reinterpret_cast<const char*>(&id), sizeof(id));
+    regs.seekp(v2::REG_STATUS);
+    regs.write(reinterpret_cast<const char*>(&status), sizeof(status));
+    regs.flush();
+
+    ASSERT_TRUE(driver_.open(config_));
+    ASSERT_TRUE(driver_.isV2Map());
+
+    FpgaLaunchConfigV2 cfg;
+    cfg.warp_id_offset = 8;
+    cfg.total_warps = 4;
+    cfg.program_len = 96;
+    cfg.entry_point = 0x1234567887654321ULL;
+    cfg.desc_base = 0xABCDEF0011223344ULL;
+    cfg.desc_stride_bytes = 64;
+    cfg.desc_count = 3;
+
+    ASSERT_TRUE(driver_.configureAndEnableLaunchV2(cfg));
+    EXPECT_TRUE(driver_.readEnabledBit());
+    EXPECT_EQ(driver_.readReg(v2::REG_WARP_ID_OFFSET), 8u);
+    EXPECT_EQ(driver_.readReg(v2::REG_TOTAL_WARPS), 4u);
+    EXPECT_EQ(driver_.readReg(v2::REG_PROGRAM_LEN), 96u);
+    EXPECT_EQ(driver_.readReg(v2::REG_PC_INIT_LO), 0x87654321u);
+    EXPECT_EQ(driver_.readReg(v2::REG_PC_INIT_HI), 0x12345678u);
+    EXPECT_EQ(driver_.readReg(v2::REG_DESC_BASE_LO), 0x11223344u);
+    EXPECT_EQ(driver_.readReg(v2::REG_DESC_BASE_HI), 0xABCDEF00u);
+    EXPECT_EQ(driver_.readReg(v2::REG_DESC_STRIDE_BYTES), 64u);
+    EXPECT_EQ(driver_.readReg(v2::REG_DESC_COUNT), 3u);
+
+    ASSERT_TRUE(driver_.startConfiguredLaunchV2());
+    EXPECT_NE(driver_.readReg(v2::REG_CTRL) & v2::CTRL_START, 0u);
+
+    driver_.ringDoorbellV2(0x55AA00FFu);
+    EXPECT_EQ(driver_.readReg(v2::REG_DOORBELL), 0x55AA00FFu);
+}
+
+TEST_F(FpgaDriverTest, V2ConfigureRejectedWhenNotReadyOrPllUnlocked) {
+    std::fstream regs(reg_path_, std::ios::in | std::ios::out | std::ios::binary);
+    const uint32_t id = v2::kDeviceId;
+    const uint32_t status_not_ready = v2::STATUS_PLL_LOCKED;
+    regs.seekp(v2::REG_ID);
+    regs.write(reinterpret_cast<const char*>(&id), sizeof(id));
+    regs.seekp(v2::REG_STATUS);
+    regs.write(reinterpret_cast<const char*>(&status_not_ready), sizeof(status_not_ready));
+    regs.flush();
+
+    ASSERT_TRUE(driver_.open(config_));
+    ASSERT_TRUE(driver_.isV2Map());
+
+    FpgaLaunchConfigV2 cfg;
+    cfg.total_warps = 1;
+    cfg.program_len = 4;
+    cfg.entry_point = 0x1000;
+    EXPECT_FALSE(driver_.configureAndEnableLaunchV2(cfg));
+    EXPECT_FALSE(driver_.startConfiguredLaunchV2());
+}
+
 TEST_F(FpgaDriverTest, BufferAllocateCopyRoundtrip) {
     ASSERT_TRUE(driver_.open(config_));
     uint64_t dev = 0;

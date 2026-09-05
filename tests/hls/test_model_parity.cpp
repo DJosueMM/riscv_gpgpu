@@ -67,15 +67,24 @@ struct DivStack {
     void init(uint32_t mask) { active = mask; depth = 0; }
 
     void handleBranch(const bool conditions[MAX_THREADS_PER_WARP]) {
-        // conds[t]=true → thread takes fall-through (active); false → thread diverges
-        uint32_t fall = 0, jump = 0;
+        // Match DivergenceStack::handleBranch in HLS: conditions[t]==true goes
+        // to the taken/fall-through set, false goes to not-taken (masked until join).
+        uint32_t taken = 0, not_taken = 0;
         for (int t = 0; t < MAX_THREADS_PER_WARP; ++t) {
             if (!((active >> t) & 1u)) continue;
-            if (!conditions[t]) fall |= (1u << t);
-            else                jump |= (1u << t);
+            if (conditions[t]) taken |= (1u << t);
+            else               not_taken |= (1u << t);
         }
-        frames[depth++].mask = jump;   // save the masked-out set
-        active = fall;
+
+        if (taken != 0 && not_taken != 0) {
+            frames[depth++].mask = not_taken;
+            active = taken;
+        } else if (taken == 0 && not_taken != 0) {
+            frames[depth++].mask = not_taken;
+            active = 0;
+        } else {
+            active = (taken != 0) ? taken : not_taken;
+        }
     }
 
     void handleJoin() {
@@ -179,6 +188,7 @@ struct HlsRunner {
     hls::stream<mem_req_t>       mem_req_out{"pr_req"};
     hls::stream<mem_resp_t>      mem_resp_in{"pr_resp"};
     hls::stream<warp_status_t>   status_out{"pr_status"};
+    hls::stream<reg_seed_t>      reg_seed_in{"pr_reg_seed"};
     instr_word_t program[MAX_PROGRAM_LEN] = {};
     std::thread  cp_th;
     std::thread  mem_th;
@@ -208,7 +218,7 @@ struct HlsRunner {
         });
 
         cp_th = std::thread([this, regs, plen]() {
-            compute_pipeline(0, dispatch_in, program, plen, regs, nullptr,
+            compute_pipeline(0, dispatch_in, program, plen, regs, reg_seed_in,
                               mem_req_out, mem_resp_in, status_out);
         });
     }

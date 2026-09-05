@@ -27,16 +27,25 @@ void gpgpu_scheduler(
     reg_t* initial_regs_ptr0,
     reg_t* initial_regs_ptr1,
 
-    uint32_t      program_len,
     warp_id_t     total_warps,
-    warp_id_t     warp_id_offset,
+    uint32_t      _reserved0,
+    uint32_t      program_len,
+    uint32_t      _reserved1,
     bool          start,
-    bool&         busy,
-    bool&         done,
-    bool&         fault,
+    uint32_t      _reserved2,
+    warp_id_t     warp_id_offset,
+    uint32_t      _reserved3,
+    hls::stream<scheduler_status_t>& status_out,
     hls::stream<mem_req_t>&  mem_req_out,
     hls::stream<mem_resp_t>& mem_resp_in
 ) {
+    // Unused - see the ADDR_BITS-mod-16 CSR write-decode workaround comment
+    // on the declaration in gpgpu_top.h. These pad every REAL scalar below
+    // onto a mod-16 offset (silently discard writes below).
+    (void)_reserved0;
+    (void)_reserved1;
+    (void)_reserved2;
+    (void)_reserved3;
     // One AXI master owns program loading.
 #pragma HLS INTERFACE m_axi \
     port=program_ptr \
@@ -59,14 +68,17 @@ void gpgpu_scheduler(
     bundle=gmem2 \
     max_widen_bitwidth=RISCV_GPGPU_MAXI_MAX_WIDEN_BITWIDTH
 
-#pragma HLS INTERFACE s_axilite port=program_len    bundle=control
 #pragma HLS INTERFACE s_axilite port=total_warps    bundle=control
-#pragma HLS INTERFACE s_axilite port=warp_id_offset bundle=control
+#pragma HLS INTERFACE s_axilite port=_reserved0      bundle=control
+#pragma HLS INTERFACE s_axilite port=program_len    bundle=control
+#pragma HLS INTERFACE s_axilite port=_reserved1      bundle=control
 #pragma HLS INTERFACE s_axilite port=start          bundle=control
-#pragma HLS INTERFACE s_axilite port=busy           bundle=control
-#pragma HLS INTERFACE s_axilite port=done           bundle=control
-#pragma HLS INTERFACE s_axilite port=fault          bundle=control
+#pragma HLS INTERFACE s_axilite port=_reserved2      bundle=control
+#pragma HLS INTERFACE s_axilite port=warp_id_offset bundle=control
+#pragma HLS INTERFACE s_axilite port=_reserved3      bundle=control
+#pragma HLS INTERFACE s_axilite port=return         bundle=control
 
+#pragma HLS INTERFACE axis port=status_out
 #pragma HLS INTERFACE axis port=mem_req_out
 #pragma HLS INTERFACE axis port=mem_resp_in
 
@@ -104,7 +116,7 @@ void gpgpu_scheduler(
 
     // Barrier controller sees NUM_CLUSTERS (=2) streams instead of NUM_CUS.
     barrierCoreN<NUM_CLUSTERS>(
-        total_warps, start, busy, done, fault,
+        total_warps, start, status_out,
         cluster_events, cluster_signal
     );
 
@@ -171,9 +183,7 @@ void gpgpu_scheduler(
     barrierCore(
         total_warps,
         start,
-        busy,
-        done,
-        fault,
+        status_out,
         barrier_events,
         barrier_signal
     );

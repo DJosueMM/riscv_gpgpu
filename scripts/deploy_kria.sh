@@ -107,33 +107,42 @@ fi
 log "Loading bitstream and running ${TEST_NAME} on the board"
 RUN_LOG="$(mktemp "${TMPDIR:-/tmp}/kria_run.XXXXXX.log")"
 STATUS=PASS
-if ! ssh "$KRIA_HOST" bash -s -- \
-        "$REMOTE_DIR" "$BITSTREAM_NAME" "$KERNEL_NAME" "$TEST_NAME" "$KRIA_SUDO_PASS" <<'REMOTE' >"$RUN_LOG" 2>&1
+LOG_ALREADY_PRINTED=0
+if [[ -n "$KRIA_SUDO_PASS" ]]; then
+    if ! ssh "$KRIA_HOST" bash -s -- \
+            "$REMOTE_DIR" "$BITSTREAM_NAME" "$KERNEL_NAME" "$TEST_NAME" "$KRIA_SUDO_PASS" <<'REMOTE' >"$RUN_LOG" 2>&1
 set -euo pipefail
 REMOTE_DIR="$1"; BITSTREAM="$2"; KERNEL="$3"; TEST="$4"; SUDO_PASS="$5"
 cd "$REMOTE_DIR"
-if [[ -n "$SUDO_PASS" ]]; then
-    echo "$SUDO_PASS" | sudo -S fpgautil -b "$BITSTREAM"
-else
-    sudo fpgautil -b "$BITSTREAM"
-fi
+echo "$SUDO_PASS" | sudo -S fpgautil -b "$BITSTREAM"
 # Allow time for the PLL to lock and proc_sys_reset to release ap_rst_n.
 sleep 2
 chmod +x "$TEST"
-if [[ -n "$SUDO_PASS" ]]; then
-    echo "$SUDO_PASS" | sudo -S env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
-else
-    sudo env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
-fi
+echo "$SUDO_PASS" | sudo -S env GPGPU_KERNEL_ELF="$REMOTE_DIR/$KERNEL" "./$TEST"
 REMOTE
-then
+    then
+        STATUS=FAIL
+    fi
+elif [[ -t 0 ]]; then
+    printf -v REMOTE_COMMAND \
+        'set -euo pipefail; cd %q; sudo fpgautil -b %q; sleep 2; chmod +x %q; sudo env GPGPU_KERNEL_ELF=%q ./%q' \
+        "$REMOTE_DIR" "$BITSTREAM_NAME" "$TEST_NAME" \
+        "$REMOTE_DIR/$KERNEL_NAME" "$TEST_NAME"
+    LOG_ALREADY_PRINTED=1
+    if ! ssh -tt "$KRIA_HOST" "$REMOTE_COMMAND" 2>&1 | tee "$RUN_LOG"; then
+        STATUS=FAIL
+    fi
+else
+    echo "ERROR: sudo requires a TTY; run interactively or set KRIA_SUDO_PASS" >"$RUN_LOG"
     STATUS=FAIL
 fi
 if [[ "$STATUS" == PASS ]] && ! grep -Fq -- "$EXPECT_MARKER" "$RUN_LOG"; then
     echo "ERROR: expected success marker not found: ${EXPECT_MARKER}" >>"$RUN_LOG"
     STATUS=FAIL
 fi
-cat "$RUN_LOG"
+if [[ "$LOG_ALREADY_PRINTED" -eq 0 ]]; then
+    cat "$RUN_LOG"
+fi
 if [[ "$STATUS" == PASS ]]; then
     REPORT_RESULT="VALIDATED ON HARDWARE"
 else

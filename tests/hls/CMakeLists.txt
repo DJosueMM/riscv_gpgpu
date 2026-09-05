@@ -62,6 +62,16 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE)
         GTest::Main
     )
     add_test(NAME hls_data_structures_tests COMMAND test_hls_data_structures)
+
+    add_executable(test_system_top_hls test_system_top_hls.cpp)
+    target_include_directories(test_system_top_hls PRIVATE
+        ${CMAKE_SOURCE_DIR}/hls/src
+    )
+    target_link_libraries(test_system_top_hls PRIVATE
+        GTest::GTest
+        GTest::Main
+    )
+    add_test(NAME system_top_hls_control_tests COMMAND test_system_top_hls)
 else()
     message(STATUS "GTest and/or Vitis HLS headers (ap_int.h/hls_stream.h) not found - skipping test_hls_data_structures. Set XILINX_HLS_INCLUDE to the Vitis HLS include/ dir to enable.")
 endif()
@@ -81,6 +91,7 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE AND EXISTS ${HLS_COMPUTE_P
         GTest::Main
         Threads::Threads
     )
+    target_compile_definitions(test_compute_pipeline PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
     add_test(NAME compute_pipeline_tests COMMAND test_compute_pipeline)
 else()
     message(STATUS "hls/src/compute_unit/compute_pipeline.cpp not found and/or Vitis HLS headers missing - skipping test_compute_pipeline")
@@ -119,7 +130,8 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE AND EXISTS ${HLS_COMPUTE_P
         GTest::Main
         Threads::Threads
     )
-    add_test(NAME pipeline_integration_tests COMMAND test_pipeline_integration)
+    target_compile_definitions(test_pipeline_integration PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
+    add_test(NAME hls_pipeline_tests COMMAND test_pipeline_integration)
 else()
     message(STATUS "hls/src/{compute_unit,memory}/{compute,memory}_pipeline.cpp not found and/or Vitis HLS headers missing - skipping test_pipeline_integration")
 endif()
@@ -197,6 +209,7 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE
         GTest::Main
         Threads::Threads
     )
+    target_compile_definitions(test_gpgpu_top PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
     add_test(NAME gpgpu_top_tests COMMAND test_gpgpu_top)
 else()
     message(STATUS "hls/src/scheduler/gpgpu_top.h and/or compute_pipeline.cpp/memory_pipeline.cpp not found, and/or Vitis HLS headers missing - skipping test_gpgpu_top")
@@ -221,6 +234,7 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE
         GTest::Main
         Threads::Threads
     )
+    target_compile_definitions(test_hls_counters PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
     add_test(NAME hls_counter_tests COMMAND test_hls_counters)
 else()
     message(STATUS "compute_pipeline.cpp/memory_pipeline.cpp or Vitis HLS headers missing - skipping test_hls_counters")
@@ -242,6 +256,7 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE AND EXISTS ${HLS_COMPUTE_P
         GTest::Main
         Threads::Threads
     )
+    target_compile_definitions(test_hls_binary_execution PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
     add_test(NAME hls_binary_execution_tests COMMAND test_hls_binary_execution)
 else()
     message(STATUS "compute_pipeline.cpp or Vitis HLS headers missing - skipping test_hls_binary_execution")
@@ -267,6 +282,7 @@ if(BUILD_TESTS AND GTest_FOUND AND XILINX_HLS_INCLUDE
         GTest::Main
         Threads::Threads
     )
+    target_compile_definitions(test_model_parity PRIVATE RISCV_GPGPU_ENABLE_VECTOR_OPS=1)
     add_test(NAME model_parity_tests COMMAND test_model_parity)
 else()
     message(STATUS "compute_pipeline.cpp/memory_pipeline.cpp or Vitis HLS headers missing - skipping test_model_parity")

@@ -21,6 +21,7 @@
 // round (which the real hardware never does).
 
 #include <gtest/gtest.h>
+#include <atomic>
 #include <thread>
 #include <vector>
 
@@ -52,6 +53,14 @@ size_t loadProgram(instr_word_t program[MAX_PROGRAM_LEN],
     return out_i;
 }
 
+struct AutoDetach {
+    explicit AutoDetach(std::thread& t_) : t(t_) {}
+    ~AutoDetach() {
+        if (t.joinable()) t.detach();
+    }
+    std::thread& t;
+};
+
 }  // namespace
 
 TEST(GpgpuTop, SingleWarpKernelRunsToCompletionAutonomously) {
@@ -75,14 +84,14 @@ TEST(GpgpuTop, SingleWarpKernelRunsToCompletionAutonomously) {
         initial_regs[t * NUM_REGS_PER_THREAD + 1] = t;
     }
 
-    static CuDispatchUnit cu;
+    static CuDispatchUnit cus[NUM_CUS];
     static hls::stream<warp_dispatch_t> dispatch_out("dispatch_out");
     static hls::stream<warp_status_t>   status_in("status_in");
+    static hls::stream<warp_status_t>   pipeline_status("pipeline_status");
     static hls::stream<mem_req_t>       mem_req("mem_req");
     static hls::stream<mem_resp_t>      mem_resp("mem_resp");
-
-    // Pre-load program into cu.programArray() (programLoader's role in HW).
-    { auto& p = cu.programArray(); for (size_t i = 0; i < program_len; ++i) p[i] = dram_program[i]; }
+    static hls::stream<reg_seed_t>      reg_seed[NUM_CUS];
+    static hls::stream<bool>            loaded[NUM_CUS];
     // docs/hls/interfaces.md SS16.37: schedulerCore no longer owns barrier
     // state/busy/done/fault - barrierCore does, reached via these streams.
     // NUM_CUS-sized like the real gpgpu_scheduler wiring, even though this
@@ -92,48 +101,71 @@ TEST(GpgpuTop, SingleWarpKernelRunsToCompletionAutonomously) {
     // used by a single compute_pipeline instance.
     static hls::stream<WarpStatusCode>   barrier_events[NUM_CUS];
     static hls::stream<barrier_signal_t> barrier_signal[NUM_CUS];
+    static hls::stream<scheduler_status_t> scheduler_status("scheduler_status");
 
-    static bool busy = false, done = false, fault = false;
-    // Cleared once `busy` is observed (matches the real host-clears-start-
-    // once-device-is-busy protocol, docs/hls/interfaces.md SS2.5.6) -
-    // without this, schedulerCore relaunches forever once `done` fires
-    // (SS16.6's header comment on schedulerCore has the full reasoning).
-    // Plain bool, not atomic, same informal cross-thread convention this
-    // file already uses for busy/done/fault.
+    static std::atomic<bool> busy{false}, done{false}, fault{false};
+    static std::atomic<uint32_t> retired_instructions{0};
+    // Kept asserted through completion so every persistent DATAFLOW process
+    // observes the launch. barrierCore's launch latch prevents relaunch.
     static bool start = true;
 
+    std::thread loader_thread([&]() {
+        programLoader(dram_program, initial_regs, initial_regs,
+                      static_cast<uint32_t>(program_len), warp_id_t(1),
+                      warp_id_t(0), start, cus, reg_seed, loaded);
+    });
     std::thread barrier_thread([&]() {
-        barrierCore(/*total_warps=*/warp_id_t(1), start, busy, done, fault,
+        barrierCore(/*total_warps=*/warp_id_t(1), start, scheduler_status,
                     barrier_events, barrier_signal);
     });
+    std::thread status_thread([&]() {
+        while (true) {
+            scheduler_status_t status = scheduler_status.read();
+            busy = status[0];
+            done = status[1];
+            fault = status[2];
+        }
+    });
     std::thread sched_thread([&]() {
-        schedulerCore(cu, cu_id_t(0), static_cast<uint32_t>(program_len),
+        schedulerCore(cus[0], cu_id_t(0), static_cast<uint32_t>(program_len),
                       /*total_warps=*/warp_id_t(1), start,
                       dispatch_out, status_in,
-                      barrier_events[0], barrier_signal[0]);
+                      barrier_events[0], barrier_signal[0],
+                      /*warp_id_offset=*/warp_id_t(0), loaded[0]);
+    });
+    std::thread pipeline_status_thread([&]() {
+        while (true) {
+            warp_status_t status = pipeline_status.read();
+            retired_instructions.store(static_cast<uint32_t>(status.instr_count));
+            status_in.write(status);
+        }
     });
     std::thread cp_thread([&]() {
-        compute_pipeline(cu_id_t(0), dispatch_out, cu.programArray(),
-                          program_len, cu.regsArray(), initial_regs,
-                          mem_req, mem_resp, status_in);
+        compute_pipeline(cu_id_t(0), dispatch_out, cus[0].programArray(),
+                          program_len, cus[0].regsArray(), reg_seed[0],
+                          mem_req, mem_resp, pipeline_status);
     });
+    AutoDetach d_loader(loader_thread);
+    AutoDetach d_barrier(barrier_thread);
+    AutoDetach d_status(status_thread);
+    AutoDetach d_sched(sched_thread);
+    AutoDetach d_pipe_status(pipeline_status_thread);
+    AutoDetach d_cp(cp_thread);
 
     int spins = 0;
-    while (!done) {
-        ASSERT_FALSE(fault) << "kernel launch faulted";
-        if (busy) start = false;
-        ASSERT_LT(++spins, 1000000) << "scheduler must make progress, not hang";
+    while (!done.load()) {
+        ASSERT_FALSE(fault.load()) << "kernel launch faulted";
+        ASSERT_LT(++spins, 5000000) << "scheduler must make progress, not hang";
     }
+    start = false;
+    EXPECT_GT(retired_instructions.load(), 0u);
 
     // Golden: r6[t] = (global_tid + 1) * alpha + y = (t+1)*2 + 10 - same
     // expected values as ComputePipeline.IntSaxpy (test_compute_pipeline.cpp).
     for (int t = 0; t < MAX_THREADS_PER_WARP; ++t) {
         uint32_t expect = (t + 1) * 2 + 10;
-        EXPECT_EQ(static_cast<uint32_t>(cu.regsArray()[0][t][6]), expect) << "lane " << t;
+        EXPECT_EQ(static_cast<uint32_t>(cus[0].regsArray()[0][t][6]), expect) << "lane " << t;
     }
-    barrier_thread.detach();
-    sched_thread.detach();
-    cp_thread.detach();
 }
 
 // docs/hls/interfaces.md SS16.37: this test's original single-CU shape
@@ -172,14 +204,7 @@ TEST(GpgpuTop, TwoWarpBarrierKernelDrivenAcrossTwoRealCUs) {
     // slot 0 (assignSlot()'s `w = cu_id + slot*NUM_CUS`) - one resident
     // warp per CU, each in slot 0 of its OWN CuDispatchUnit (not slot 0/1
     // of a shared one, unlike the old single-CU shape this replaces).
-    static CuDispatchUnit cu0;
-    static CuDispatchUnit cu1;
-
-    // Pre-load program into both CU program arrays (programLoader's role in HW).
-    {
-        auto& p0 = cu0.programArray(); auto& p1 = cu1.programArray();
-        for (size_t i = 0; i < program_len; ++i) { p0[i] = dram_program[i]; p1[i] = dram_program[i]; }
-    }
+    static CuDispatchUnit cus[NUM_CUS];
     static hls::stream<warp_dispatch_t> dispatch_out0("dispatch_out0");
     static hls::stream<warp_dispatch_t> dispatch_out1("dispatch_out1");
     static hls::stream<warp_status_t>   status_in0("status_in0");
@@ -188,42 +213,59 @@ TEST(GpgpuTop, TwoWarpBarrierKernelDrivenAcrossTwoRealCUs) {
     static hls::stream<mem_resp_t>      cu_mem_resp[NUM_CUS];
     static hls::stream<mem_req_t>       mem_req_single("mem_req_single");
     static hls::stream<mem_resp_t>      mem_resp_single("mem_resp_single");
+    static hls::stream<reg_seed_t>      reg_seed[NUM_CUS];
+    static hls::stream<bool>            loaded[NUM_CUS];
     // docs/hls/interfaces.md SS16.37: schedulerCore no longer owns barrier
     // state/busy/done/fault - the one, real, shared barrierCore does.
     static hls::stream<WarpStatusCode>   barrier_events[NUM_CUS];
     static hls::stream<barrier_signal_t> barrier_signal[NUM_CUS];
+    static hls::stream<scheduler_status_t> scheduler_status("scheduler_status_two_cu");
 
     static std::vector<ap_uint<32>> backing(1u << 16, ap_uint<32>(0));  // covers 0x10000..0x1FFFF
 
-    static bool busy = false, done = false, fault = false;
-    // See the single-warp test above for why this must be cleared once
-    // `busy` is observed (SS16.6).
+    static std::atomic<bool> busy{false}, done{false}, fault{false};
+    // See the single-warp test above for why this remains asserted until done.
     static bool start = true;
 
+    std::thread loader_thread([&]() {
+        programLoader(dram_program, initial_regs, initial_regs,
+                      static_cast<uint32_t>(program_len), warp_id_t(2),
+                      warp_id_t(0), start, cus, reg_seed, loaded);
+    });
     std::thread barrier_thread([&]() {
-        barrierCore(/*total_warps=*/warp_id_t(2), start, busy, done, fault,
+        barrierCore(/*total_warps=*/warp_id_t(2), start, scheduler_status,
                     barrier_events, barrier_signal);
     });
+    std::thread status_thread([&]() {
+        while (true) {
+            scheduler_status_t status = scheduler_status.read();
+            busy = status[0];
+            done = status[1];
+            fault = status[2];
+        }
+    });
     std::thread sched0_thread([&]() {
-        schedulerCore(cu0, cu_id_t(0), static_cast<uint32_t>(program_len),
+        schedulerCore(cus[0], cu_id_t(0), static_cast<uint32_t>(program_len),
                       /*total_warps=*/warp_id_t(2), start,
                       dispatch_out0, status_in0,
-                      barrier_events[0], barrier_signal[0]);
+                      barrier_events[0], barrier_signal[0],
+                      /*warp_id_offset=*/warp_id_t(0), loaded[0]);
     });
     std::thread sched1_thread([&]() {
-        schedulerCore(cu1, cu_id_t(1), static_cast<uint32_t>(program_len),
+        schedulerCore(cus[1], cu_id_t(1), static_cast<uint32_t>(program_len),
                       /*total_warps=*/warp_id_t(2), start,
                       dispatch_out1, status_in1,
-                      barrier_events[1], barrier_signal[1]);
+                      barrier_events[1], barrier_signal[1],
+                      /*warp_id_offset=*/warp_id_t(0), loaded[1]);
     });
     std::thread cp0_thread([&]() {
-        compute_pipeline(cu_id_t(0), dispatch_out0, cu0.programArray(),
-                          program_len, cu0.regsArray(), initial_regs,
+        compute_pipeline(cu_id_t(0), dispatch_out0, cus[0].programArray(),
+                          program_len, cus[0].regsArray(), reg_seed[0],
                           cu_mem_req[0], cu_mem_resp[0], status_in0);
     });
     std::thread cp1_thread([&]() {
-        compute_pipeline(cu_id_t(1), dispatch_out1, cu1.programArray(),
-                          program_len, cu1.regsArray(), initial_regs,
+        compute_pipeline(cu_id_t(1), dispatch_out1, cus[1].programArray(),
+                          program_len, cus[1].regsArray(), reg_seed[1],
                           cu_mem_req[1], cu_mem_resp[1], status_in1);
     });
     std::thread arb_thread([&]() {
@@ -232,13 +274,22 @@ TEST(GpgpuTop, TwoWarpBarrierKernelDrivenAcrossTwoRealCUs) {
     std::thread mem_thread([&]() {
         memory_pipeline(mem_req_single, mem_resp_single, backing.data());
     });
+    AutoDetach d_loader(loader_thread);
+    AutoDetach d_barrier(barrier_thread);
+    AutoDetach d_status(status_thread);
+    AutoDetach d_sched0(sched0_thread);
+    AutoDetach d_sched1(sched1_thread);
+    AutoDetach d_cp0(cp0_thread);
+    AutoDetach d_cp1(cp1_thread);
+    AutoDetach d_arb(arb_thread);
+    AutoDetach d_mem(mem_thread);
 
     int spins = 0;
-    while (!done) {
-        ASSERT_FALSE(fault) << "kernel launch faulted";
-        if (busy) start = false;
-        ASSERT_LT(++spins, 1000000) << "scheduler must make progress through the barrier across both CUs, not deadlock";
+    while (!done.load()) {
+        ASSERT_FALSE(fault.load()) << "kernel launch faulted";
+        ASSERT_LT(++spins, 5000000) << "scheduler must make progress through the barrier across both CUs, not deadlock";
     }
+    start = false;
 
     // Same golden-model expected values as PipelineIntegration.
     // ParallelReductionAcrossTwoWarpsWithBarrier (test_pipeline_integration.cpp)
@@ -249,20 +300,13 @@ TEST(GpgpuTop, TwoWarpBarrierKernelDrivenAcrossTwoRealCUs) {
     // via cu1's own slot 0 (not cu.regsArray()[1]) - each CU has exactly
     // one resident warp here, so both land in slot 0 of their own,
     // separate CuDispatchUnit.
-    EXPECT_EQ(static_cast<uint32_t>(cu0.regsArray()[0][0][6]), 34u) << "warp-0 (CU0) thread-0: r6";
-    EXPECT_EQ(static_cast<uint32_t>(cu0.regsArray()[0][1][6]), 36u) << "warp-0 (CU0) thread-1: r6";
-    EXPECT_EQ(static_cast<uint32_t>(cu1.regsArray()[0][0][6]), 34u) << "warp-1 (CU1) thread-0: r6 (symmetric)";
+    EXPECT_EQ(static_cast<uint32_t>(cus[0].regsArray()[0][0][6]), 34u) << "warp-0 (CU0) thread-0: r6";
+    EXPECT_EQ(static_cast<uint32_t>(cus[0].regsArray()[0][1][6]), 36u) << "warp-0 (CU0) thread-1: r6";
+    EXPECT_EQ(static_cast<uint32_t>(cus[1].regsArray()[0][0][6]), 34u) << "warp-1 (CU1) thread-0: r6 (symmetric)";
     EXPECT_EQ(static_cast<uint32_t>(backing[0x10008 / 4]), 34u) << "mem[0x10008] (warp-0 thread-0)";
     EXPECT_EQ(static_cast<uint32_t>(backing[0x1000C / 4]), 36u) << "mem[0x1000C] (warp-0 thread-1)";
     EXPECT_EQ(static_cast<uint32_t>(backing[0x10088 / 4]), 34u) << "mem[0x10088] (warp-1 thread-0)";
 
-    barrier_thread.detach();
-    sched0_thread.detach();
-    sched1_thread.detach();
-    cp0_thread.detach();
-    cp1_thread.detach();
-    arb_thread.detach();
-    mem_thread.detach();
 }
 
 // docs/hls/interfaces.md SS15: NO plain-g++ GTest exists for

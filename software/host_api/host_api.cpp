@@ -42,10 +42,28 @@ static bool launchKernelOnFpga(const KernelLaunchArgs& launch,
         error = "Failed to load kernel ELF into FPGA instruction memory";
         return false;
     }
-    driver.writeReg(REG_GRID_X, launch.grid_x);
-    driver.writeReg(REG_GRID_Y, launch.grid_y);
-    // PC_INIT was written by the ELF loader; assert start.
-    driver.start();
+
+    if (driver.isV2Map()) {
+        FpgaLaunchConfigV2 cfg;
+        cfg.warp_id_offset = 0;
+        cfg.total_warps = launch.grid_x * launch.grid_y * launch.grid_z;
+        cfg.program_len = 0;  // unknown in current ELF-only launch path
+        cfg.entry_point = static_cast<uint64_t>(entry_point);
+        if (!driver.configureAndEnableLaunchV2(cfg)) {
+            error = "FPGA V2 launch rejected: device not READY/PLL_LOCKED or config invalid";
+            return false;
+        }
+        if (!driver.startConfiguredLaunchV2()) {
+            error = "FPGA V2 launch rejected at START gate (READY/ENABLED check failed)";
+            return false;
+        }
+    } else {
+        driver.writeReg(REG_GRID_X, launch.grid_x);
+        driver.writeReg(REG_GRID_Y, launch.grid_y);
+        // PC_INIT was written by the ELF loader; assert start.
+        driver.start();
+    }
+
     // Verification contract: IDLE → RUNNING within 10 ms.
     if (!driver.waitForStatus(Status::RUNNING, 10)
         && driver.status() != Status::DONE) {

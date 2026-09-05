@@ -100,8 +100,8 @@ int sc_main(int /*argc*/, char* /*argv*/[]) {
     // ═════════════════════════════════════════════════════════════════════════
     Platform::printPhaseHeader(0, "Build & Initialization");
     LOG_SEP("Phase 0 Results");
-    CHECK(top.isKernelComplete(), "GPGPUTop: isKernelComplete() before launch");
-    CHECK(sys.isComplete(),       "SystemTop: isComplete() before launch");
+    CHECK(!top.isKernelComplete(), "GPGPUTop: isKernelComplete() = false before launch");
+    CHECK(!sys.isComplete(),       "SystemTop: isComplete() = false before launch");
 
     // ═════════════════════════════════════════════════════════════════════════
     // Phase 1 – Memory Hierarchy
@@ -292,7 +292,7 @@ int sc_main(int /*argc*/, char* /*argv*/[]) {
     };
 
     LOG_SEP("5a: 2x1 kernel (2 warps)");
-    CHECK(top.isKernelComplete(), "isKernelComplete() = true before launch");
+    CHECK(!top.isKernelComplete(), "isKernelComplete() = false before launch");
     top.launchKernel(2, 1, saxpy_prog);
     CHECK(!top.isKernelComplete(), "isKernelComplete() = false after launch");
     sc_core::sc_start(sc_core::sc_time(100, sc_core::SC_NS));
@@ -377,7 +377,7 @@ int sc_main(int /*argc*/, char* /*argv*/[]) {
     // 4 total warps → GPU 0: 2 warps (offset 0), GPU 1: 2 warps (offset 2)
     LOG_SEP("7a: Even split – 4 warps across 2 GPUs");
     {
-        CHECK(sys.isComplete(), "sys.isComplete() = true before launch");
+        CHECK(!sys.isComplete(), "sys.isComplete() = false before launch");
 
         sys.launchKernel(4, 1, saxpy_prog);
         CHECK(!sys.isComplete(), "sys.isComplete() = false after launch");

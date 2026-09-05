@@ -35,8 +35,15 @@ public:
     void launchKernel(uint32_t grid_x, uint32_t grid_y,
                       std::vector<Instruction> program,
                       uint32_t warp_id_offset = 0);
+    void resetControl();
+    void setPllLocked(bool locked);
+    bool isPllLocked() const;
 
     bool isKernelComplete() const;
+    bool isReady() const;
+    bool hasFault() const;
+    uint32_t readStatusWord() const;
+    uint32_t getMaxResidentWarps() const;
 
     uint64_t getTotalCycles()       const;
     uint64_t getTotalInstructions() const;
@@ -57,6 +64,10 @@ private:
     uint32_t           warp_id_offset_       = 0;
     uint32_t           kernel_start_warp_id_ = 0;   // 
     uint32_t           total_warps_          = 0;   // grid_x * grid_y
+    bool               busy_                 = false;
+    bool               done_                 = false;
+    bool               fault_                = false;
+    bool               pll_locked_           = true;
 
     std::unique_ptr<WarpScheduler>            scheduler_;
     std::unique_ptr<MemoryHierarchy>          memory_;

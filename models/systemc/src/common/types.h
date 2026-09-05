@@ -20,6 +20,12 @@ using Address          = uint64_t;
 using CycleCount       = uint64_t;
 using InstructionCount = uint64_t;
 
+// ── Canonical device status CSR bits (shared meaning with HLS) ─────────────
+constexpr uint32_t DEVICE_STATUS_BUSY  = 1u << 0;
+constexpr uint32_t DEVICE_STATUS_DONE  = 1u << 1;
+constexpr uint32_t DEVICE_STATUS_FAULT = 1u << 2;
+constexpr uint32_t DEVICE_STATUS_READY = 1u << 3;
+
 // ── Cache lookup result ───────────────────────────────────────────────────────
 enum class CacheStatus { L1_HIT, L2_HIT, MISS };
 

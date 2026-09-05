@@ -20,6 +20,7 @@ if(BUILD_TESTS AND BUILD_SYSTEMC_MODELS AND SystemC_FOUND)
         target_link_libraries(test_pipeline PRIVATE
             GTest::GTest
             gpgpu_top
+            system_top
             systemc_common
             SystemC::SystemC
         )

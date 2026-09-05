@@ -305,19 +305,40 @@ inline void schedulerCore(
 // only its own subset (identified by warp_id including offset).
 // See docs/hls/interfaces.md §17.1 for the complete scope contract.
 // ─────────────────────────────────────────────────────────────────────────────
+// NOTE (CSR AXI-Lite write-decode workaround - see
+// /memories/session/bit3_swap_experiment.md and
+// /memories/repo/csr_status_notes.md for the full investigation):
+//
+// A confirmed hardware defect (root cause is downstream of this HLS source -
+// the generated `control_s_axi` RTL is textually correct; most likely the
+// `smartconnect_control` interconnect's data-width adaptation between the PS
+// AXI master and this 32-bit AXI-Lite slave) silently DISCARDS any register
+// write whose byte offset is NOT a multiple of 16 (equivalently: any offset
+// with AWADDR[3] or AWADDR[2] set). Vitis HLS normally packs s_axilite
+// scalars at a tight 8-byte stride (0x10, 0x18, 0x20, 0x28, ...), so exactly
+// half of them would silently fail to latch on real hardware.
+//
+// Workaround: `_reserved0.._reserved3` are UNUSED dummy scalars interleaved
+// between the 4 real registers below, forcing each real register onto its
+// own mod-16 offset (0x10, 0x20, 0x30, 0x40) while the dummies absorb the
+// broken in-between offsets (0x18, 0x28, 0x38, 0x48) where nothing is ever
+// read or written. Do not remove these without re-verifying the CSR bug is
+// actually fixed upstream (Vitis HLS erratum / interconnect fix).
 void gpgpu_scheduler(
     instr_word_t* program_ptr,
 
     reg_t* initial_regs_ptr0,
     reg_t* initial_regs_ptr1,
 
-    uint32_t      program_len,
     warp_id_t     total_warps,
-    warp_id_t     warp_id_offset,
+    uint32_t      _reserved0,
+    uint32_t      program_len,
+    uint32_t      _reserved1,
     bool          start,
-    bool&         busy,
-    bool&         done,
-    bool&         fault,
+    uint32_t      _reserved2,
+    warp_id_t     warp_id_offset,
+    uint32_t      _reserved3,
+    hls::stream<scheduler_status_t>& status_out,
     hls::stream<mem_req_t>&  mem_req_out,
     hls::stream<mem_resp_t>& mem_resp_in
 );

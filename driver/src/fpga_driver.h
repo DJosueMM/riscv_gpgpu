@@ -38,6 +38,18 @@ struct FpgaDriverConfig {
     bool skip_id_check = false;
 };
 
+struct FpgaLaunchConfigV2 {
+    uint32_t warp_id_offset = 0;
+    uint32_t total_warps = 0;
+    uint32_t program_len = 0;
+    uint64_t entry_point = 0;
+
+    // Optional descriptor mode.
+    uint64_t desc_base = 0;
+    uint32_t desc_stride_bytes = 0;
+    uint32_t desc_count = 0;
+};
+
 class FpgaDriver {
 public:
     FpgaDriver() = default;
@@ -53,6 +65,7 @@ public:
     bool open(const FpgaDriverConfig& config);
     void close();
     bool isOpen() const { return regs_ != nullptr; }
+    bool isV2Map() const { return reg_map_v2_; }
 
     // ── Register access (offsets from fpga_regs.h) ───────────────────────────
     uint32_t readReg(uint32_t offset) const;
@@ -64,6 +77,16 @@ public:
     Status status() const;              // decoded STATUS register
     // Poll STATUS until it equals `expected` or timeout_ms elapses.
     bool waitForStatus(Status expected, uint32_t timeout_ms) const;
+
+    // ── V2 split-plane control helpers (AXI4-Lite CSR map v2) ───────────────
+    uint32_t readStatusWord() const;
+    bool readReadyBit() const;
+    bool readEnabledBit() const;
+    bool readPllLockedBit() const;
+    void writeEnable(bool enable);
+    bool configureAndEnableLaunchV2(const FpgaLaunchConfigV2& cfg);
+    bool startConfiguredLaunchV2();
+    void ringDoorbellV2(uint32_t value);
 
     // ── Device memory (bump allocator over the FPGA aperture) ────────────────
     bool allocateBuffer(uint64_t& dev_addr, size_t size);
@@ -85,6 +108,8 @@ private:
     volatile uint8_t* mem_ = nullptr;
     uint64_t mem_base_ = 0;   // device address of mem_[0]
     size_t mem_size_ = 0;
+    bool reg_map_v2_ = false;
+    bool v2_configured_ = false;
 
     uint64_t next_alloc_ = 0; // device address of next allocation
     std::map<uint64_t, size_t> buffers_;

@@ -74,7 +74,9 @@ struct CpFixture {
         return status_out.read();
     }
 
-    ~CpFixture() { th.detach(); }
+    ~CpFixture() {
+        if (th.joinable()) th.detach();
+    }
 };
 
 }  // namespace
@@ -186,7 +188,7 @@ TEST(HlsCounters, MemorySubsystemCountersMonotonic) {
     };
 
     // Write some values to the backing store
-    constexpr uint32_t base = 0x2000;
+    constexpr uint32_t base = 0x10000;
     for (int t = 0; t < 4; ++t) {
         uint32_t addr = base + t * 4;
         mem.handleRequest(mkReq(addr, true, reg_t(t + 1)), backing.data());

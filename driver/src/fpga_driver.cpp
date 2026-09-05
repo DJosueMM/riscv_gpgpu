@@ -79,12 +79,19 @@ bool FpgaDriver::open(const FpgaDriverConfig& config) {
 
     if (!config.skip_id_check) {
         const uint32_t id = readReg(REG_ID);
-        if (id != kDeviceId) {
+        if (id == kDeviceId) {
+            reg_map_v2_ = false;
+        } else if (id == v2::kDeviceId) {
+            reg_map_v2_ = true;
+        } else {
             std::cerr << "[fpga_driver] unexpected device ID 0x" << std::hex << id
-                      << " (expected 0x" << kDeviceId << ")" << std::dec << "\n";
+                      << " (expected 0x" << kDeviceId
+                      << " or 0x" << v2::kDeviceId << ")" << std::dec << "\n";
             close();
             return false;
         }
+    } else {
+        reg_map_v2_ = (readReg(REG_ID) == v2::kDeviceId);
     }
 
     std::cout << "[fpga_driver] mapped regs via " << config.reg_dev_path
@@ -105,6 +112,8 @@ void FpgaDriver::close() {
     if (reg_fd_ >= 0) { ::close(reg_fd_); reg_fd_ = -1; }
     if (mem_fd_ >= 0) { ::close(mem_fd_); mem_fd_ = -1; }
     buffers_.clear();
+    reg_map_v2_ = false;
+    v2_configured_ = false;
     mem_base_ = mem_size_ = next_alloc_ = 0;
 }
 
@@ -117,16 +126,33 @@ void FpgaDriver::writeReg(uint32_t offset, uint32_t value) {
 }
 
 bool FpgaDriver::reset() {
-    writeReg(REG_CTRL, CTRL_RESET);
+    if (reg_map_v2_) {
+        writeReg(v2::REG_CTRL, v2::CTRL_RESET);
+        v2_configured_ = false;
+    } else {
+        writeReg(REG_CTRL, CTRL_RESET);
+    }
     return waitForStatus(Status::IDLE, 100);
 }
 
 void FpgaDriver::start() {
-    writeReg(REG_CTRL, CTRL_START);
+    if (reg_map_v2_) {
+        const uint32_t ctrl = readReg(v2::REG_CTRL);
+        writeReg(v2::REG_CTRL, ctrl | v2::CTRL_START);
+    } else {
+        writeReg(REG_CTRL, CTRL_START);
+    }
 }
 
 Status FpgaDriver::status() const {
-    return static_cast<Status>(readReg(REG_STATUS));
+    if (!reg_map_v2_) {
+        return static_cast<Status>(readReg(REG_STATUS));
+    }
+    const uint32_t s = readReg(v2::REG_STATUS);
+    if (s & v2::STATUS_FAULT) return Status::ERROR;
+    if (s & v2::STATUS_BUSY) return Status::RUNNING;
+    if (s & v2::STATUS_DONE) return Status::DONE;
+    return Status::IDLE;
 }
 
 bool FpgaDriver::waitForStatus(Status expected, uint32_t timeout_ms) const {
@@ -137,6 +163,72 @@ bool FpgaDriver::waitForStatus(Status expected, uint32_t timeout_ms) const {
         std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
     return true;
+}
+
+uint32_t FpgaDriver::readStatusWord() const {
+    return reg_map_v2_ ? readReg(v2::REG_STATUS) : readReg(REG_STATUS);
+}
+
+bool FpgaDriver::readReadyBit() const {
+    if (!reg_map_v2_) return status() == Status::IDLE;
+    return (readReg(v2::REG_STATUS) & v2::STATUS_READY) != 0;
+}
+
+bool FpgaDriver::readEnabledBit() const {
+    if (!reg_map_v2_) return true;
+    const uint32_t status_reg = readReg(v2::REG_STATUS);
+    if ((status_reg & v2::STATUS_ENABLED) != 0) return true;
+    // Fallback for early bring-up wrappers that have CTRL.ENABLE wired but not
+    // STATUS.ENABLED yet.
+    const uint32_t ctrl_reg = readReg(v2::REG_CTRL);
+    return (ctrl_reg & v2::CTRL_ENABLE) != 0;
+}
+
+bool FpgaDriver::readPllLockedBit() const {
+    if (!reg_map_v2_) return true;
+    return (readReg(v2::REG_STATUS) & v2::STATUS_PLL_LOCKED) != 0;
+}
+
+void FpgaDriver::writeEnable(bool enable) {
+    if (!reg_map_v2_) return;
+    uint32_t ctrl = readReg(v2::REG_CTRL);
+    if (enable) ctrl |= v2::CTRL_ENABLE;
+    else        ctrl &= ~v2::CTRL_ENABLE;
+    writeReg(v2::REG_CTRL, ctrl);
+}
+
+bool FpgaDriver::configureAndEnableLaunchV2(const FpgaLaunchConfigV2& cfg) {
+    if (!reg_map_v2_) return false;
+    if (!readReadyBit() || !readPllLockedBit()) return false;
+
+    writeReg(v2::REG_WARP_ID_OFFSET, cfg.warp_id_offset);
+    writeReg(v2::REG_TOTAL_WARPS, cfg.total_warps);
+    writeReg(v2::REG_PROGRAM_LEN, cfg.program_len);
+    writeReg(v2::REG_PC_INIT_LO, static_cast<uint32_t>(cfg.entry_point & 0xffffffffULL));
+    writeReg(v2::REG_PC_INIT_HI, static_cast<uint32_t>((cfg.entry_point >> 32) & 0xffffffffULL));
+    writeReg(v2::REG_DESC_BASE_LO, static_cast<uint32_t>(cfg.desc_base & 0xffffffffULL));
+    writeReg(v2::REG_DESC_BASE_HI, static_cast<uint32_t>((cfg.desc_base >> 32) & 0xffffffffULL));
+    writeReg(v2::REG_DESC_STRIDE_BYTES, cfg.desc_stride_bytes);
+    writeReg(v2::REG_DESC_COUNT, cfg.desc_count);
+
+    writeEnable(true);
+    v2_configured_ = true;
+    return true;
+}
+
+bool FpgaDriver::startConfiguredLaunchV2() {
+    if (!reg_map_v2_ || !v2_configured_) return false;
+    if (!readReadyBit() || !readPllLockedBit() || !readEnabledBit()) return false;
+
+    const uint32_t ctrl = readReg(v2::REG_CTRL);
+    writeReg(v2::REG_CTRL, ctrl | v2::CTRL_START);
+    v2_configured_ = false;
+    return true;
+}
+
+void FpgaDriver::ringDoorbellV2(uint32_t value) {
+    if (!reg_map_v2_) return;
+    writeReg(v2::REG_DOORBELL, value);
 }
 
 // ── Device memory ─────────────────────────────────────────────────────────────

@@ -46,13 +46,14 @@ struct CpFixture {
     hls::stream<mem_req_t>       mem_req_out{"mem_req_out"};
     hls::stream<mem_resp_t>      mem_resp_in{"mem_resp_in"};
     hls::stream<warp_status_t>   status_out{"status_out"};
+    hls::stream<reg_seed_t>      reg_seed_in{"reg_seed_in"};
     instr_word_t program[MAX_PROGRAM_LEN];
     std::thread th;
 
     void start(reg_t regs[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD],
                uint32_t program_len, cu_id_t cu_id = 0) {
         th = std::thread([this, regs, program_len, cu_id]() {
-            compute_pipeline(cu_id, dispatch_in, program, program_len, regs, nullptr,
+            compute_pipeline(cu_id, dispatch_in, program, program_len, regs, reg_seed_in,
                               mem_req_out, mem_resp_in, status_out);
         });
     }
@@ -67,7 +68,9 @@ struct CpFixture {
         return status_out.read();
     }
 
-    ~CpFixture() { th.detach(); }
+    ~CpFixture() {
+        if (th.joinable()) th.detach();
+    }
 };
 
 }  // namespace
@@ -201,7 +204,9 @@ TEST(HlsBinaryExecution, LwSwRoundTripBinaryEncoded) {
     mem_th.detach();
 
     std::thread cp_th([&]() {
-        compute_pipeline(0, disp, cp.program, 3, regs, nullptr, mem_req, mem_resp, stat);
+        hls::stream<reg_seed_t> reg_seed_local{"reg_seed_local"};
+        compute_pipeline(0, disp, cp.program, 3, regs, reg_seed_local,
+                         mem_req, mem_resp, stat);
     });
     cp_th.detach();
 

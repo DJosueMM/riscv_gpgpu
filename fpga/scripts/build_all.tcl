@@ -241,6 +241,8 @@ create_project \
     -part $part_name \
     -force
 
+add_files -norecurse "$repo_root/fpga/rtl/axis_status_latch.v"
+
 set_property ip_repo_paths \
     [list $gpgpu_ip_repo $memory_ip_repo] \
     [current_project]
@@ -272,8 +274,33 @@ create_bd_cell \
     -vlnv riscv_gpgpu:hls:riscv_gpgpu_hls_memory_pipeline:1.0 \
     memory_pipeline_0
 
+create_bd_cell \
+    -type module \
+    -reference axis_status_latch \
+    scheduler_status_latch_0
+
+create_bd_cell \
+    -type ip \
+    -vlnv xilinx.com:ip:axi_gpio:* \
+    scheduler_status_gpio_0
+
+set_property -dict [list \
+    CONFIG.C_GPIO_WIDTH {8} \
+    CONFIG.C_ALL_INPUTS {1} \
+    CONFIG.C_IS_DUAL {0} \
+] [get_bd_cells scheduler_status_gpio_0]
+
+connect_bd_intf_net \
+    [get_bd_intf_pins gpgpu_scheduler_0/status_out] \
+    [get_bd_intf_pins scheduler_status_latch_0/s_axis_status]
+
+connect_bd_net \
+    [get_bd_pins scheduler_status_latch_0/status] \
+    [get_bd_pins scheduler_status_gpio_0/gpio_io_i]
+
 puts "PASS: gpgpu_scheduler instantiated"
 puts "PASS: memory_pipeline instantiated"
+puts "PASS: scheduler status latch instantiated"
 
 
 # ============================================================================
@@ -365,6 +392,10 @@ create_bd_cell \
     -vlnv xilinx.com:ip:proc_sys_reset:* \
     rst_pl_clk0
 
+set_property -dict [list \
+    CONFIG.C_EXT_RESET_HIGH {0} \
+] [get_bd_cells rst_pl_clk0]
+
 # ── PLL: 100 MHz (pl_clk0) → 200 MHz ────────────────────────────────────────
 # Uses PLL primitive (not MMCM) as requested.
 # locked output feeds proc_sys_reset/dcm_locked: the design stays in reset
@@ -392,6 +423,8 @@ connect_bd_net \
     [get_bd_pins clk_wiz_0/clk_out1] \
     [get_bd_pins gpgpu_scheduler_0/ap_clk] \
     [get_bd_pins memory_pipeline_0/ap_clk] \
+    [get_bd_pins scheduler_status_latch_0/aclk] \
+    [get_bd_pins scheduler_status_gpio_0/s_axi_aclk] \
     [get_bd_pins rst_pl_clk0/slowest_sync_clk]
 
 # PLL locked → dcm_locked: proc_sys_reset holds all resets while PLL is unlocked.
@@ -408,7 +441,9 @@ connect_bd_net \
 connect_bd_net \
     [get_bd_pins rst_pl_clk0/peripheral_aresetn] \
     [get_bd_pins gpgpu_scheduler_0/ap_rst_n] \
-    [get_bd_pins memory_pipeline_0/ap_rst_n]
+    [get_bd_pins memory_pipeline_0/ap_rst_n] \
+    [get_bd_pins scheduler_status_latch_0/aresetn] \
+    [get_bd_pins scheduler_status_gpio_0/s_axi_aresetn]
 
 # PS AXI interface clocks: run at PLL frequency so there is no CDC between
 # the SmartConnect and the PS ports. PS8 MAXIGP/SAXIHPC min period = 3 ns,
@@ -440,7 +475,7 @@ create_bd_cell \
 
 set_property -dict [list \
     CONFIG.NUM_SI {1} \
-    CONFIG.NUM_MI {3} \
+    CONFIG.NUM_MI {4} \
 ] [get_bd_cells smartconnect_control]
 
 # ARM/PS -> control SmartConnect.
@@ -462,6 +497,11 @@ connect_bd_intf_net \
 connect_bd_intf_net \
     [get_bd_intf_pins smartconnect_control/M02_AXI] \
     [get_bd_intf_pins memory_pipeline_0/s_axi_control]
+
+# Scheduler status snapshot.
+connect_bd_intf_net \
+    [get_bd_intf_pins smartconnect_control/M03_AXI] \
+    [get_bd_intf_pins scheduler_status_gpio_0/S_AXI]
 
 puts "PASS: ARM control fabric connected"
 
@@ -536,32 +576,6 @@ puts "PASS: AXI fabric clock/reset connected"
 
 
 # ============================================================================
-# STEP 12 - Keep HLS wrapper active
-# ============================================================================
-
-puts ""
-puts "---------------------------------------------------------------------"
-puts "STEP 12: Enabling GPGPU HLS wrapper"
-puts "---------------------------------------------------------------------"
-
-create_bd_cell \
-    -type ip \
-    -vlnv xilinx.com:ip:xlconstant:* \
-    const_ap_start
-
-set_property -dict [list \
-    CONFIG.CONST_WIDTH {1} \
-    CONFIG.CONST_VAL   {1} \
-] [get_bd_cells const_ap_start]
-
-connect_bd_net \
-    [get_bd_pins const_ap_start/dout] \
-    [get_bd_pins gpgpu_scheduler_0/ap_start]
-
-puts "PASS: gpgpu_scheduler ap_start tied HIGH"
-
-
-# ============================================================================
 # STEP 13 - Assign AXI addresses
 # ============================================================================
 
@@ -571,6 +585,15 @@ puts "STEP 13: Assigning AXI addresses"
 puts "---------------------------------------------------------------------"
 
 assign_bd_address
+
+set_property OFFSET 0xA0000000 \
+    [get_bd_addr_segs zynq_ultra_ps_e_0/Data/SEG_gpgpu_scheduler_0_Reg]
+set_property OFFSET 0xA0010000 \
+    [get_bd_addr_segs zynq_ultra_ps_e_0/Data/SEG_gpgpu_scheduler_0_Reg_1]
+set_property OFFSET 0xA0020000 \
+    [get_bd_addr_segs zynq_ultra_ps_e_0/Data/SEG_memory_pipeline_0_Reg]
+set_property OFFSET 0xA0030000 \
+    [get_bd_addr_segs zynq_ultra_ps_e_0/Data/SEG_scheduler_status_gpio_0_Reg]
 save_bd_design
 
 puts ""
@@ -578,6 +601,7 @@ puts "Expected control address map:"
 puts "  0xA0000000 : gpgpu_scheduler / s_axi_control"
 puts "  0xA0010000 : gpgpu_scheduler / s_axi_control_r"
 puts "  0xA0020000 : memory_pipeline / s_axi_control"
+puts "  0xA0030000 : scheduler status / AXI GPIO"
 puts ""
 puts "Accelerator DDR window:"
 puts "  0x00000000 - 0x7FFFFFFF"
@@ -820,6 +844,7 @@ puts "Control address map:"
 puts "  0xA0000000 : gpgpu_scheduler / s_axi_control"
 puts "  0xA0010000 : gpgpu_scheduler / s_axi_control_r"
 puts "  0xA0020000 : memory_pipeline / s_axi_control"
+puts "  0xA0030000 : scheduler status / AXI GPIO"
 puts ""
 puts "DDR address window:"
 puts "  0x00000000 - 0x7FFFFFFF"

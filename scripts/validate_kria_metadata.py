@@ -11,17 +11,16 @@ EXPECTED_BASES = {
     ("gpgpu_scheduler_0", "C_S_AXI_CONTROL_BASEADDR"): 0xA0000000,
     ("gpgpu_scheduler_0", "C_S_AXI_CONTROL_R_BASEADDR"): 0xA0010000,
     ("memory_pipeline_0", "C_S_AXI_CONTROL_BASEADDR"): 0xA0020000,
+    ("scheduler_status_gpio_0", "C_BASEADDR"): 0xA0030000,
 }
 
 EXPECTED_REGISTERS = {
     ("gpgpu_scheduler_0", "s_axi_control"): {
+        "CTRL": 0x00,
         "program_len": 0x10,
         "total_warps": 0x18,
         "warp_id_offset": 0x20,
         "start_r": 0x28,
-        "busy": 0x30,
-        "done": 0x40,
-        "fault": 0x50,
     },
     ("gpgpu_scheduler_0", "s_axi_control_r"): {
         "program_ptr_1": 0x10,
@@ -36,11 +35,20 @@ EXPECTED_REGISTERS = {
         "global_mem_1": 0x10,
         "global_mem_2": 0x14,
     },
+    ("scheduler_status_gpio_0", "S_AXI"): {
+        "GPIO_DATA": 0x00,
+        "GPIO_TRI": 0x04,
+    },
 }
 
 MEMORY_REGIONS = {
     "ddr": (0x60000000, 64 * 1024 * 1024),
     "ocm": (0xFFFC0000, 128 * 1024),
+}
+
+EXPECTED_REGISTER_WIDTHS = {
+    ("scheduler_status_gpio_0", "S_AXI", "GPIO_DATA"): (3, 8),
+    ("scheduler_status_gpio_0", "S_AXI", "GPIO_TRI"): (3, 8),
 }
 
 
@@ -66,7 +74,11 @@ def validate_metadata(hwh: Path, memory: str) -> list[str]:
     errors: list[str] = []
     modules = {
         instance: module_by_instance(root, instance)
-        for instance in ("gpgpu_scheduler_0", "memory_pipeline_0")
+        for instance in (
+            "gpgpu_scheduler_0",
+            "memory_pipeline_0",
+            "scheduler_status_gpio_0",
+        )
     }
     for instance, module in modules.items():
         if module is None:
@@ -105,10 +117,26 @@ def validate_metadata(hwh: Path, memory: str) -> list[str]:
                     f"{instance}.{interface}.{register_name}: "
                     f"expected 0x{expected:02x}, got {actual}"
                 )
-            if width is None or parse_number(width) != 32:
+            expected_width = EXPECTED_REGISTER_WIDTHS.get(
+                (instance, interface, register_name),
+                32,
+            )
+            width_ok = False
+            if width is not None:
+                actual_width = parse_number(width)
+                if isinstance(expected_width, tuple):
+                    width_ok = actual_width in expected_width
+                else:
+                    width_ok = actual_width == expected_width
+            if not width_ok:
+                expected_width_text = (
+                    "/".join(str(item) for item in expected_width)
+                    if isinstance(expected_width, tuple)
+                    else str(expected_width)
+                )
                 errors.append(
                     f"{instance}.{interface}.{register_name}: "
-                    f"expected width 32, got {width}"
+                    f"expected width {expected_width_text}, got {width}"
                 )
 
     region_base, region_size = MEMORY_REGIONS[memory]

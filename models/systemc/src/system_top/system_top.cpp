@@ -56,6 +56,29 @@ void SystemTop::launchKernel(uint32_t grid_x, uint32_t grid_y,
     }
 }
 
+void SystemTop::resetControl() {
+    for (auto& gpu : gpus_) {
+        gpu->resetControl();
+    }
+    LOG_INFO("SystemTop: resetControl propagated to all GPUs");
+}
+
+void SystemTop::setPllLocked(bool locked) {
+    for (auto& gpu : gpus_) {
+        gpu->setPllLocked(locked);
+    }
+    LOG_INFO(std::string("SystemTop: setPllLocked(")
+             + (locked ? "true" : "false")
+             + ") propagated to all GPUs");
+}
+
+bool SystemTop::isPllLocked() const {
+    for (const auto& gpu : gpus_) {
+        if (!gpu->isPllLocked()) return false;
+    }
+    return true;
+}
+
 // ── Status ────────────────────────────────────────────────────────────────────
 
 bool SystemTop::isComplete() const {
@@ -63,6 +86,25 @@ bool SystemTop::isComplete() const {
         if (!gpu->isKernelComplete()) return false;
     }
     return true;
+}
+
+bool SystemTop::isReady() const {
+    for (const auto& gpu : gpus_) {
+        if (!gpu->isReady()) return false;
+    }
+    return true;
+}
+
+bool SystemTop::isFault() const {
+    for (const auto& gpu : gpus_) {
+        if (gpu->hasFault()) return true;
+    }
+    return false;
+}
+
+uint32_t SystemTop::readStatusWord(uint32_t gpu_idx) const {
+    if (gpu_idx >= gpus_.size()) return 0;
+    return gpus_[gpu_idx]->readStatusWord();
 }
 
 // ── Aggregated statistics ─────────────────────────────────────────────────────
