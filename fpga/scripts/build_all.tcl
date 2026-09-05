@@ -285,7 +285,7 @@ create_bd_cell \
     scheduler_status_gpio_0
 
 set_property -dict [list \
-    CONFIG.C_GPIO_WIDTH {8} \
+    CONFIG.C_GPIO_WIDTH {32} \
     CONFIG.C_ALL_INPUTS {1} \
     CONFIG.C_IS_DUAL {0} \
 ] [get_bd_cells scheduler_status_gpio_0]
@@ -408,7 +408,7 @@ create_bd_cell \
 set_property -dict [list \
     CONFIG.PRIMITIVE            {PLL}         \
     CONFIG.PRIM_IN_FREQ         {96.968727}   \
-    CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {200.000} \
+    CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {150.000} \
     CONFIG.USE_LOCKED           {true}         \
     CONFIG.USE_RESET            {false}        \
 ] [get_bd_cells clk_wiz_0]

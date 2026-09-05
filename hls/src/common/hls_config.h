@@ -93,7 +93,11 @@ constexpr int L2_SETS_PER_WAY   = L2_LINES_TOTAL / L2_WAYS;              // 512
 // duplicated per-CU the way schedulerCore's own WarpSlot[] correctly is.
 // KV260 is the sole target board (SS14) - this is not a per-board decision.
 #ifndef RISCV_GPGPU_NUM_CUS
-#define RISCV_GPGPU_NUM_CUS 8
+// TEMPORARY: capped at 4 (agreed max for now, not 8) while validating the
+// cu_program_s DATAFLOW-merge fix (per-CU program arrays now passed as
+// explicit named variables instead of indexing a shared CuDispatchUnit[]
+// array - see gpgpu_top.cpp/gpgpu_top.h). Restore to 8 once resolved.
+#define RISCV_GPGPU_NUM_CUS 4
 #endif
 constexpr int NUM_CUS                    = RISCV_GPGPU_NUM_CUS;
 // When NUM_CUS >= 13, a flat DATAFLOW region would exceed the HLS tool's limit of

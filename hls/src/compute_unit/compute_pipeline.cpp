@@ -297,10 +297,22 @@ void compute_pipeline(
     hls::stream<mem_req_t>&  mem_req_out,
     hls::stream<mem_resp_t>& mem_resp_in,
 
-    hls::stream<warp_status_t>& status_out
+    hls::stream<warp_status_t>& status_out,
+
+    hls::stream<ap_uint<4> >& stage_debug_out
 ) {
-#pragma HLS INTERFACE s_axilite port=cu_id       bundle=control
-#pragma HLS INTERFACE s_axilite port=program_len bundle=control
+    // No s_axilite INTERFACE pragmas for cu_id/program_len here (unlike an
+    // earlier T022-era standalone-kernel version of this file): this
+    // function is only ever called internally inside gpgpu_scheduler's
+    // merged DATAFLOW region (like schedulerCore/programLoader, which
+    // never had such pragmas either). A leftover s_axilite bundle=control
+    // pragma on a non-top DATAFLOW sub-process makes Vitis HLS treat it as
+    // needing its own externally-driven ap_start/ap_ctrl_hs handshake,
+    // which nothing in the merged canvas ever supplies - the instance then
+    // sits permanently unstarted. Confirmed via hardware: with the pragmas
+    // present, compute_pipeline[0]'s while(true) body never executed even
+    // once (round-4 tag9 heartbeat stayed 0), while schedulerCore/
+    // programLoader (no such pragmas) ran fine.
 #pragma HLS INTERFACE axis      port=dispatch_in
 #pragma HLS INTERFACE ap_memory port=program
 #pragma HLS INTERFACE ap_memory port=regs
@@ -322,21 +334,38 @@ void compute_pipeline(
     // hardware model memory_pipeline already used, now extended here too.
     // No `return` anywhere in this loop, unlike T022: see this file's
     // header for why a BARRIER can no longer end the kernel invocation.
+    bool cp0_alive_reported = false;
     while (true) {
 #pragma HLS PIPELINE off
+        // Tag 9 (one-shot): proves this process's while(true) body executes
+        // at all in hardware - distinguishes "never started/dispatched by
+        // the DATAFLOW canvas" from "started but stuck inside the loop".
+        if (!cp0_alive_reported) {
+            stage_debug_out.write(ap_uint<4>(9));
+            cp0_alive_reported = true;
+        }
         // Drain register seeds from programLoader before processing dispatches.
         // programLoader guarantees all seeds are in the stream before schedulerCore
         // dispatches the first warp, so this branch is always empty during execution.
         if (!reg_seed_in.empty()) {
             reg_seed_t s = reg_seed_in.read();
             regs[s.slot_id][s.flat_i >> 5][s.flat_i & 31] = s.value;
+            // Tag 8: proves compute_pipeline[0] is alive and actively
+            // draining reg_seed_in, as opposed to programLoader's writes
+            // simply fitting inside the FIFO's depth unread (which they
+            // can: total per-CU writes == depth exactly when total_warps==1,
+            // per gpgpu_top.h's programLoader "local_w < total_warps" guard).
+            stage_debug_out.write(ap_uint<4>(8));
         } else if (!dispatch_in.empty()) {
             warp_dispatch_t d = dispatch_in.read();
+            stage_debug_out.write(ap_uint<4>(3));
+            if (d.resume_pc < program_len) stage_debug_out.write(ap_uint<4>(4));
             warp_status_t st = executeOneWarp(cu_id, d, program, program_len,
                                                regs[d.slot_id],
                                                mem_req_out, mem_resp_in);
             st.slot_id = d.slot_id;
             status_out.write(st);
+            stage_debug_out.write(ap_uint<4>(5));
         }
     }
 }

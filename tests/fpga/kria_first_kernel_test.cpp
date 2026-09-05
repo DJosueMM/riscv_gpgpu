@@ -515,11 +515,13 @@ int main() {
 
     std::atomic_thread_fence(std::memory_order_seq_cst);
     const uint32_t actual = *result;
+    const uint32_t final_status = readReg(status_regs, kStatusData);
     const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time).count();
-        printf("status ready_seen=%d busy_seen=%d done=%d fault=%d elapsed_ms=%lld actual=0x%08x\n",
+        printf("status ready_seen=%d busy_seen=%d done=%d fault=%d elapsed_ms=%lld actual=0x%08x "
+           "final_status=0x%08x\n",
             saw_ready ? 1 : 0, saw_busy ? 1 : 0, done ? 1 : 0, fault ? 1 : 0,
-           static_cast<long long>(elapsed_ms), actual);
+           static_cast<long long>(elapsed_ms), actual, final_status);
 
     if (!saw_busy && !done && !fault) {
         fprintf(stderr,

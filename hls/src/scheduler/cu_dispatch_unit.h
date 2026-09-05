@@ -166,6 +166,19 @@ CHECK_ALL_DONE:
 // this shape has never been flagged in any real csynth run) ─────────────────
 class CuDispatchUnit {
 public:
+    // HLS 200-1019 explicitly warned the default PIPO depth between
+    // programLoader (writer) and compute_pipeline (reader) for program_
+    // "may... avoid deadlocks" at depth=3 - applying the tool's own
+    // suggested depth here (constructor is the nearest valid function scope
+    // for a member-array pragma; '#pragma HLS' is not legal directly in a
+    // class body). Same bug class as the reg_seed stream depth=4 fix (a
+    // too-shallow inter-process buffer silently blocking a producer/
+    // consumer pair in the merged DATAFLOW canvas), just for a PIPO-backed
+    // ap_memory array instead of an hls::stream FIFO.
+    CuDispatchUnit() {
+#pragma HLS STREAM variable=program_ type=pipo depth=3
+    }
+
     // compute_pipeline's regs[][] port aliases this directly (top-level
     // wiring detail, docs/hls/interfaces.md SS2.5.3).
     reg_t (&regsArray())[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD] {

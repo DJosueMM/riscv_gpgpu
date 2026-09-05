@@ -46,13 +46,15 @@ namespace riscv_gpgpu_hls {
 // itself (SS10.7's decoupling: that bookkeeping belongs at this
 // orchestration layer, not inside the slot-bookkeeping free functions).
 //
-// `cu` is a reference to storage owned by the caller (gpgpu_scheduler) -
-// shared with compute_pipeline for regs_/program_ only (SS16.6's header
-// comment has the reasoning for why that specific sharing is fine). `cu_id`
-// identifies which CU this instance is - no longer hardcoded (SS16.37),
-// each of the NUM_CUS real call sites in gpgpu_scheduler passes its own.
-// `slots` is NOT a parameter - declared inside this function's own body,
-// matching compute_pipeline's own RegFile/DivergenceStack shape exactly.
+// `cu_id` identifies which CU this instance is - no longer hardcoded
+// (SS16.37), each of the NUM_CUS real call sites in gpgpu_scheduler passes
+// its own. `slots` is NOT a parameter - declared inside this function's
+// own body, matching compute_pipeline's own RegFile/DivergenceStack shape
+// exactly. (No longer takes a `CuDispatchUnit&` - it was never actually
+// read/written here; passing it anyway was an unnecessary extra reference
+// to the same program_/regs_ storage compute_pipeline binds, later found
+// to matter once program_'s sharing was root-caused, see programLoader's
+// parameter comment below.)
 //
 // SS16.37: `busy`/`done`/`fault` moved OUT to barrierCore
 // (barrier_arbiter.h) - they were never really per-CU concepts (a kernel
@@ -92,9 +94,37 @@ inline void programLoader(
     warp_id_t     total_warps,
     warp_id_t     warp_id_offset,
     bool&         start,
-    CuDispatchUnit (&cus)[NUM_CUS],
+    // Explicit, uniquely-named per-CU arrays (NOT a CuDispatchUnit[NUM_CUS]
+    // array-of-objects indexed through a loop) - HLS's DATAFLOW aliasing
+    // analysis runs before UNROLL, so any single array (or array of
+    // objects) indexed by a loop variable makes every element appear to
+    // alias the same storage, which is exactly what triggered WARNING
+    // 214-475 ("Merging processes 'compute_pipeline' x4 due to reads on
+    // 'cu_program_s'") - all 4 compute_pipeline instances collapsed into
+    // one serialized process, defeating the whole point of having
+    // independent per-CU pipelines. Same fix already proven for regs_
+    // (cu_regs_0..7 in gpgpu_top.cpp) applied here to program_.
+    instr_word_t (&program_0)[MAX_PROGRAM_LEN]
+#if RISCV_GPGPU_NUM_CUS >= 2
+  , instr_word_t (&program_1)[MAX_PROGRAM_LEN]
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 3
+  , instr_word_t (&program_2)[MAX_PROGRAM_LEN]
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 4
+  , instr_word_t (&program_3)[MAX_PROGRAM_LEN]
+#endif
+  ,
     hls::stream<reg_seed_t> (&seed_out)[NUM_CUS],
-    hls::stream<bool>       (&loaded_out)[NUM_CUS]
+    hls::stream<bool>       (&loaded_out)[NUM_CUS],
+    // TEMPORARY DIAGNOSTIC (see barrier_arbiter.h's barrierCoreN comment):
+    // 1 = Phase 1 (program word load) complete; 2 = CU0 fully seeded
+    // (loaded_out[0] just written); bit31 set = seed-loop progress update
+    // ([3:0]=seed_c, [7:4]=seed_slot, [19:8]=seed_i), written BEFORE the
+    // per-iteration m_axi read so a frozen read is visible externally as
+    // the exact (seed_c, seed_slot, seed_i) it froze at. Removed once the
+    // busy-forever investigation concludes.
+    hls::stream<ap_uint<32> >& phase_debug_out
 ) {
     bool     loaded    = false;
     uint32_t load_idx  = 0;
@@ -118,19 +148,26 @@ inline void programLoader(
 
         if (!loaded) {
             // Phase 1: broadcast program words to all CUs.
+            // Explicit per-CU statements (no loop, no shared array) - see
+            // this function's parameter list comment for why.
             if (load_idx < MAX_PROGRAM_LEN) {
                 if (load_idx < program_len) {
                     instr_word_t instr = program_ptr[load_idx];
-LOAD_PROGRAM_WORDS:
-                    for (int c = 0; c < NUM_CUS; ++c) {
-#pragma HLS UNROLL
-                        instr_word_t (&program_c)[MAX_PROGRAM_LEN] = cus[c].programArray();
-                        program_c[load_idx] = instr;
-                    }
+                    program_0[load_idx] = instr;
+#if RISCV_GPGPU_NUM_CUS >= 2
+                    program_1[load_idx] = instr;
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 3
+                    program_2[load_idx] = instr;
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 4
+                    program_3[load_idx] = instr;
+#endif
                 }
                 ++load_idx;
             } else {
                 loaded = true;
+                phase_debug_out.write(ap_uint<32>(1));
             }
         } else if (!regs_done) {
             // Phase 2: seed register files one word per iteration.
@@ -138,6 +175,13 @@ LOAD_PROGRAM_WORDS:
             // immediately after the last word for CU c, so schedulerCore[c] can
             // start dispatching while later CUs are still being seeded.
             if (seed_c < NUM_CUS) {
+                ap_uint<32> progress = 0;
+                progress[31]    = 1;
+                progress(3, 0)  = ap_uint<4>(seed_c);
+                progress(7, 4)  = ap_uint<4>(seed_slot);
+                progress(19, 8) = ap_uint<12>(seed_i);
+                phase_debug_out.write(progress);
+
                 warp_id_t local_w  = warp_id_t(seed_c) + warp_id_t(seed_slot) * warp_id_t(NUM_CUS);
                 if (local_w < total_warps) {
                     warp_id_t global_w = warp_id_offset + local_w;
@@ -158,6 +202,7 @@ LOAD_PROGRAM_WORDS:
                         seed_slot = 0;
                         // All slots for this CU seeded — unblock its schedulerCore.
                         loaded_out[seed_c].write(true);
+                        if (seed_c == 0) phase_debug_out.write(ap_uint<32>(2));
                         ++seed_c;
                     }
                 }
@@ -211,7 +256,6 @@ LOAD_WORDS_HIER:
 }
 #endif  // RISCV_GPGPU_NUM_CUS >= 13
 inline void schedulerCore(
-    CuDispatchUnit& cu,
     cu_id_t         cu_id,
     uint32_t        program_len,
     warp_id_t       total_warps,
@@ -221,7 +265,12 @@ inline void schedulerCore(
     hls::stream<WarpStatusCode>&   barrier_events_out,
     hls::stream<barrier_signal_t>& barrier_signal_in,
     warp_id_t       warp_id_offset,
-    hls::stream<bool>& loaded_in   // from programLoader: consumed once per kernel launch
+    hls::stream<bool>& loaded_in,  // from programLoader: consumed once per kernel launch
+    // TEMPORARY DIAGNOSTIC (see barrier_arbiter.h's barrierCoreN comment):
+    // 1 = read loaded_in/launchSlots called; 2 = dispatch_out.write()
+    // returned; 6 = status_in.read() returned; 7 = barrier_events_out.write()
+    // returned. Removed once the busy-forever investigation concludes.
+    hls::stream<ap_uint<4> >& stage_debug_out
 ) {
     WarpSlot      slots[MAX_WARPS_PER_CU];
     bool          busy_cu_scheduler = false;   // this CU's own IDLE/RUNNING
@@ -252,6 +301,7 @@ inline void schedulerCore(
             busy_cu = false;
 
             busy_cu_scheduler = true;
+            stage_debug_out.write(ap_uint<4>(1));
         } else {
             // RUNNING: one scheduling round per pass.
             if (!busy_cu) {
@@ -259,12 +309,15 @@ inline void schedulerCore(
                 if (slot != INVALID_SLOT) {
                     dispatch_out.write(buildDispatch(slots, slot));
                     busy_cu = true;
+                    stage_debug_out.write(ap_uint<4>(2));
                 }
             }
             if (!status_in.empty()) {
                 warp_status_t st = status_in.read();
+                stage_debug_out.write(ap_uint<4>(6));
                 recordResult(slots, st.slot_id, st);
                 barrier_events_out.write(st.code);
+                stage_debug_out.write(ap_uint<4>(7));
                 busy_cu = false;
             }
 

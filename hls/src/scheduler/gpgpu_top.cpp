@@ -168,7 +168,28 @@ void gpgpu_scheduler(
     // 3 * NUM_CUS <= 24 backwards channels — within the ~40 tool limit.
     // ------------------------------------------------------------------
 
-    CuDispatchUnit cu[NUM_CUS];
+    // Explicit, uniquely-named per-CU program arrays (NOT a
+    // CuDispatchUnit[NUM_CUS] array-of-objects) - matches the cu_regs_0..7
+    // pattern below exactly. Root-caused this session: array-of-objects
+    // indexed through programLoader's write loop made every element look
+    // like the same storage to HLS's DATAFLOW aliasing analysis, which
+    // merged all compute_pipeline instances into one serialized process
+    // (WARNING 214-475, "due to reads on 'cu_program_s'") - defeating the
+    // whole point of independent per-CU pipelines.
+    instr_word_t cu_program_0[MAX_PROGRAM_LEN];
+#pragma HLS STREAM variable=cu_program_0 type=pipo depth=3
+#if RISCV_GPGPU_NUM_CUS >= 2
+    instr_word_t cu_program_1[MAX_PROGRAM_LEN];
+#pragma HLS STREAM variable=cu_program_1 type=pipo depth=3
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 3
+    instr_word_t cu_program_2[MAX_PROGRAM_LEN];
+#pragma HLS STREAM variable=cu_program_2 type=pipo depth=3
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 4
+    instr_word_t cu_program_3[MAX_PROGRAM_LEN];
+#pragma HLS STREAM variable=cu_program_3 type=pipo depth=3
+#endif
 
     hls::stream<warp_dispatch_t> dispatch_out[NUM_CUS];
     hls::stream<warp_status_t>   status_in[NUM_CUS];
@@ -181,6 +202,18 @@ void gpgpu_scheduler(
 
     hls::stream<reg_seed_t> reg_seed[NUM_CUS];
     hls::stream<bool>       loaded_sig[NUM_CUS];
+    // TEMPORARY DIAGNOSTIC stream (see barrier_arbiter.h's barrierCoreN
+    // comment) - programLoader's Phase1-done / CU0-seeded markers plus
+    // per-iteration seed-loop progress, polled by barrierCore and exposed
+    // as status bits 4-27.
+    hls::stream<ap_uint<32> > phase_debug;
+    // TEMPORARY DIAGNOSTIC streams (see barrier_arbiter.h's barrierCoreN
+    // comment) - one-shot pipeline-stage markers from each CU's
+    // schedulerCore/compute_pipeline; only index 0 is polled by barrierCore
+    // (CU1-7 write at most one harmless "running" tag into their own unread
+    // channel, given this session's total_warps=1 diagnostic kernels).
+    hls::stream<ap_uint<4> > sched_debug[NUM_CUS];
+    hls::stream<ap_uint<4> > cp_debug[NUM_CUS];
 
 #pragma HLS STREAM variable=dispatch_out   depth=2              dim=1
 #pragma HLS STREAM variable=status_in      depth=2              dim=1
@@ -188,8 +221,18 @@ void gpgpu_scheduler(
 #pragma HLS STREAM variable=cu_mem_resp    depth=2              dim=1
 #pragma HLS STREAM variable=barrier_events depth=MAX_WARPS_PER_CU dim=1
 #pragma HLS STREAM variable=barrier_signal depth=2              dim=1
-#pragma HLS STREAM variable=reg_seed       depth=4              dim=1
-#pragma HLS STREAM variable=loaded_sig     depth=1              dim=1
+// Was depth=4 - hardware diagnostic showed programLoader freezing exactly
+// entering seed_i=4 (see barrier_arbiter.h's scheduler_status_t comment),
+// matching a full 4-deep FIFO whose consumer wasn't draining it. Widened
+// to hold a full warp-slot's worth of seeds (MAX_THREADS_PER_WARP*
+// NUM_REGS_PER_THREAD = 32*32 = 1024) so programLoader can never block on
+// this stream.
+#pragma HLS STREAM variable=reg_seed       depth=1024           dim=1
+// HLS 200-1018 suggested depth=2 for this producer/consumer pair.
+#pragma HLS STREAM variable=loaded_sig     depth=2              dim=1
+#pragma HLS STREAM variable=phase_debug    depth=4
+#pragma HLS STREAM variable=sched_debug    depth=4              dim=1
+#pragma HLS STREAM variable=cp_debug       depth=4              dim=1
 
     // ------------------------------------------------------------------
     // Kernel-wide barrier controller
@@ -200,7 +243,10 @@ void gpgpu_scheduler(
         start,
         status_out,
         barrier_events,
-        barrier_signal
+        barrier_signal,
+        phase_debug,
+        sched_debug[0],
+        cp_debug[0]
     );
 
     // ------------------------------------------------------------------
@@ -218,9 +264,20 @@ void gpgpu_scheduler(
         total_warps,
         warp_id_offset,
         start,
-        cu,
+        cu_program_0
+#if RISCV_GPGPU_NUM_CUS >= 2
+      , cu_program_1
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 3
+      , cu_program_2
+#endif
+#if RISCV_GPGPU_NUM_CUS >= 4
+      , cu_program_3
+#endif
+      ,
         reg_seed,
-        loaded_sig
+        loaded_sig,
+        phase_debug
     );
 
     // ------------------------------------------------------------------
@@ -231,7 +288,6 @@ void gpgpu_scheduler(
 #pragma HLS UNROLL
         cu_id_t cu_id = cu_id_t(c);
         schedulerCore(
-            cu[c],
             cu_id,
             program_len,
             total_warps,
@@ -241,7 +297,8 @@ void gpgpu_scheduler(
             barrier_events[c],
             barrier_signal[c],
             warp_id_offset,
-            loaded_sig[c]
+            loaded_sig[c],
+            sched_debug[c]
         );
     }
 
@@ -258,73 +315,25 @@ void gpgpu_scheduler(
 
     reg_t cu_regs_0[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
 #pragma HLS ARRAY_PARTITION variable=cu_regs_0 dim=2 complete
-    compute_pipeline(cu_id_t(0), dispatch_out[0], cu[0].programArray(), program_len,
-                     cu_regs_0, reg_seed[0], cu_mem_req[0], cu_mem_resp[0], status_in[0]);
+    compute_pipeline(cu_id_t(0), dispatch_out[0], cu_program_0, program_len,
+                     cu_regs_0, reg_seed[0], cu_mem_req[0], cu_mem_resp[0], status_in[0], cp_debug[0]);
 #if RISCV_GPGPU_NUM_CUS >= 2
     reg_t cu_regs_1[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
 #pragma HLS ARRAY_PARTITION variable=cu_regs_1 dim=2 complete
-    compute_pipeline(cu_id_t(1), dispatch_out[1], cu[1].programArray(), program_len,
-                     cu_regs_1, reg_seed[1], cu_mem_req[1], cu_mem_resp[1], status_in[1]);
+    compute_pipeline(cu_id_t(1), dispatch_out[1], cu_program_1, program_len,
+                     cu_regs_1, reg_seed[1], cu_mem_req[1], cu_mem_resp[1], status_in[1], cp_debug[1]);
 #endif
 #if RISCV_GPGPU_NUM_CUS >= 3
     reg_t cu_regs_2[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
 #pragma HLS ARRAY_PARTITION variable=cu_regs_2 dim=2 complete
-    compute_pipeline(cu_id_t(2), dispatch_out[2], cu[2].programArray(), program_len,
-                     cu_regs_2, reg_seed[2], cu_mem_req[2], cu_mem_resp[2], status_in[2]);
+    compute_pipeline(cu_id_t(2), dispatch_out[2], cu_program_2, program_len,
+                     cu_regs_2, reg_seed[2], cu_mem_req[2], cu_mem_resp[2], status_in[2], cp_debug[2]);
 #endif
 #if RISCV_GPGPU_NUM_CUS >= 4
     reg_t cu_regs_3[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
 #pragma HLS ARRAY_PARTITION variable=cu_regs_3 dim=2 complete
-    compute_pipeline(cu_id_t(3), dispatch_out[3], cu[3].programArray(), program_len,
-                     cu_regs_3, reg_seed[3], cu_mem_req[3], cu_mem_resp[3], status_in[3]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 5
-    reg_t cu_regs_4[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_4 dim=2 complete
-    compute_pipeline(cu_id_t(4), dispatch_out[4], cu[4].programArray(), program_len,
-                     cu_regs_4, reg_seed[4], cu_mem_req[4], cu_mem_resp[4], status_in[4]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 6
-    reg_t cu_regs_5[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_5 dim=2 complete
-    compute_pipeline(cu_id_t(5), dispatch_out[5], cu[5].programArray(), program_len,
-                     cu_regs_5, reg_seed[5], cu_mem_req[5], cu_mem_resp[5], status_in[5]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 7
-    reg_t cu_regs_6[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_6 dim=2 complete
-    compute_pipeline(cu_id_t(6), dispatch_out[6], cu[6].programArray(), program_len,
-                     cu_regs_6, reg_seed[6], cu_mem_req[6], cu_mem_resp[6], status_in[6]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 8
-    reg_t cu_regs_7[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_7 dim=2 complete
-    compute_pipeline(cu_id_t(7), dispatch_out[7], cu[7].programArray(), program_len,
-                     cu_regs_7, reg_seed[7], cu_mem_req[7], cu_mem_resp[7], status_in[7]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 9
-    reg_t cu_regs_8[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_8 dim=2 complete
-    compute_pipeline(cu_id_t(8), dispatch_out[8], cu[8].programArray(), program_len,
-                     cu_regs_8, reg_seed[8], cu_mem_req[8], cu_mem_resp[8], status_in[8]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 10
-    reg_t cu_regs_9[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_9 dim=2 complete
-    compute_pipeline(cu_id_t(9), dispatch_out[9], cu[9].programArray(), program_len,
-                     cu_regs_9, reg_seed[9], cu_mem_req[9], cu_mem_resp[9], status_in[9]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 11
-    reg_t cu_regs_10[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_10 dim=2 complete
-    compute_pipeline(cu_id_t(10), dispatch_out[10], cu[10].programArray(), program_len,
-                     cu_regs_10, reg_seed[10], cu_mem_req[10], cu_mem_resp[10], status_in[10]);
-#endif
-#if RISCV_GPGPU_NUM_CUS >= 12
-    reg_t cu_regs_11[MAX_WARPS_PER_CU][MAX_THREADS_PER_WARP][NUM_REGS_PER_THREAD];
-#pragma HLS ARRAY_PARTITION variable=cu_regs_11 dim=2 complete
-    compute_pipeline(cu_id_t(11), dispatch_out[11], cu[11].programArray(), program_len,
-                     cu_regs_11, reg_seed[11], cu_mem_req[11], cu_mem_resp[11], status_in[11]);
+    compute_pipeline(cu_id_t(3), dispatch_out[3], cu_program_3, program_len,
+                     cu_regs_3, reg_seed[3], cu_mem_req[3], cu_mem_resp[3], status_in[3], cp_debug[3]);
 #endif
 
     // ------------------------------------------------------------------

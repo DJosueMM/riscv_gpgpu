@@ -47,7 +47,13 @@ void compute_pipeline(
     hls::stream<mem_req_t>&  mem_req_out,         // axis, via MemArbiter now
     hls::stream<mem_resp_t>& mem_resp_in,         // axis, via MemArbiter now
 
-    hls::stream<warp_status_t>& status_out        // axis, to this CU's CuDispatchUnit
+    hls::stream<warp_status_t>& status_out,       // axis, to this CU's CuDispatchUnit
+
+    // TEMPORARY DIAGNOSTIC (see barrier_arbiter.h's barrierCoreN comment):
+    // 3 = dispatch_in.read() returned; 4 = about to call executeOneWarp
+    // (resume_pc < program_len); 5 = status_out.write() returned. Removed
+    // once the busy-forever investigation concludes.
+    hls::stream<ap_uint<4> >& stage_debug_out
 );
 
 }  // namespace riscv_gpgpu_hls
