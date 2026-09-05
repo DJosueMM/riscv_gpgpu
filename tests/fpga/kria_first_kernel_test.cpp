@@ -451,45 +451,20 @@ int main() {
            static_cast<unsigned long long>(registers_physical),
            static_cast<unsigned long long>(region->physical_base + kResultOffset), kPoison);
 
-    // gpgpu_scheduler's free-running DATAFLOW region (including barrierCoreN,
-    // which drives scheduler_status_gpio's ready bit) never executes a single
-    // iteration until ap_start deasserts ap_idle - it must be started BEFORE
-    // polling for "ready", not after (an earlier version checked ready first
-    // and always timed out, since the kernel had literally never run yet).
-    writeReg(sched, kSchedulerApCtrl, kApStart);
-
-    printf("control before launch scheduler_ap=0x%08x start_r=0x%08x "
-           "memory_ap=0x%08x status=0x%08x\n",
-           readReg(sched, kSchedulerApCtrl), readReg(sched, kSchedStart),
-           readReg(mem_ctrl, kMemoryApCtrl), readReg(status_regs, kStatusData));
-
-    // The scheduler needs a few cycles after ap_start to reach its first
-    // status_out write before scheduler_status_gpio's ready bit asserts -
-    // poll instead of a single immediate read.
-    const auto ready_wait_start = std::chrono::steady_clock::now();
-    bool ready_before_launch = false;
-    uint32_t status_before_launch = 0;
-    while (true) {
-        status_before_launch = readReg(status_regs, kStatusData);
-        if ((status_before_launch & kStatusReady) != 0) {
-            ready_before_launch = true;
-            break;
-        }
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - ready_wait_start).count();
-        if (elapsed > timeout_ms) break;
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
-    if (!ready_before_launch) {
-        fprintf(stderr,
-                "ERROR: device did not become ready before launch after %u ms "
-                "(status=0x%08x)\n",
-                timeout_ms, status_before_launch);
-        close(fd);
-        return 1;
-    }
-
-    const auto start_time = std::chrono::steady_clock::now();
+    // gpgpu_scheduler's free-running DATAFLOW sub-blocks (programLoader,
+    // barrierCoreN, schedulerCore) are each launched exactly ONCE, when the
+    // scheduler's own top-level ap_start first deasserts ap_idle - and Vitis
+    // HLS captures every scalar argument (start, total_warps, program_len,
+    // warp_id_offset) into a read-once register AT THAT EXACT INSTANT, not
+    // as a continuously-live wire (confirmed in the generated RTL: e.g.
+    // start_val1_read_reg_114 in *_barrierCore.v only updates during the
+    // wrapper's one-shot ap_CS_fsm_state1). So start_r MUST be written and
+    // latched BEFORE writing the scheduler's own ap_ctrl=ap_start, exactly
+    // like total_warps/program_len/warp_id_offset above - writing it after
+    // (an earlier version of this test did that, to make "ready" observable
+    // first) permanently bakes in start=0, so the launch condition
+    // `start && launch_armed` inside barrierCoreN never fires and the
+    // scheduler never reaches busy.
     bool start_latched = false;
     for (uint32_t attempt = 0; attempt < kLaunchWriteRetries; ++attempt) {
         writeReg(sched, kSchedStart, 1);
@@ -505,6 +480,9 @@ int main() {
         close(fd);
         return 1;
     }
+
+    const auto start_time = std::chrono::steady_clock::now();
+    writeReg(sched, kSchedulerApCtrl, kApStart);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
     printf("control after launch scheduler_ap=0x%08x start_r=0x%08x "
